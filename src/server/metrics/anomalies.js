@@ -87,25 +87,31 @@ export function findAnomalies(db, f = {}, { today = localToday(), reviewed = fal
   const returnWait = n('alert_return_wait_days');
   const recentDays = n('payment_days_max');
 
+  // Ratios are taken on the sale amount the payment file states, when it states one:
+  // an invoice or orders report prices a Meesho line without the shipping the buyer
+  // paid, so lines from different files would not compare.
+  const saleBase = (l) => (l.settled_sale_gross > 0 ? l.settled_sale_gross : l.total_paise);
   // Payout before shipping: Meesho's shipping charge depends on distance (₹5–₹110 for
   // one product in the real files), so a far-away buyer is not an odd payout.
-  const exShip = (l) => (l.settled_net - (l.shipping || 0)) / l.total_paise;
+  const exShip = (l) => (l.settled_net - (l.shipping || 0)) / saleBase(l);
   const payoutBase = baseline(all, exShip);
   // Flipkart charges shipping by weight slab within a zone (Local/Zonal/National), so
   // a jump there usually means a wrong weight. Meesho's distance pricing is skipped.
   const shipKey = (l) => (l.platform === 'meesho' ? null : `${l.platform}|${l.code}|${l.shipping_zone || '?'}`);
   const shippingBase = baseline(all, (l) => -(l.shipping || 0), shipKey);
-  const commissionBase = baseline(all, (l) => -(l.commission || 0) / l.total_paise);
+  const commissionBase = baseline(all, (l) => -(l.commission || 0) / saleBase(l));
   // A return charge can only be missing from the returns files once they cover its time.
   const returnsCoverFrom = new Map(
     db.prepare("SELECT platform, MIN(date_from) AS d FROM imports WHERE status = 'committed' AND kind LIKE '%.returns' GROUP BY platform")
       .all().map((r) => [FAM(r.platform), r.d]),
   );
+  // Labels only: an orders-report line is not a label.
   const labelDays = new Set(
-    db.prepare('SELECT DISTINCT platform, COALESCE(invoice_date, order_date) AS d FROM orders WHERE cancelled = 0').all().map((r) => `${FAM(r.platform)}|${r.d}`),
+    db.prepare("SELECT DISTINCT platform, COALESCE(invoice_date, order_date) AS d FROM orders WHERE cancelled = 0 AND source IS NOT 'order_report'")
+      .all().map((r) => `${FAM(r.platform)}|${r.d}`),
   );
   // Any label at all, cancelled ones too: a paid cancelled order has its own alert.
-  const labelled = new Set(db.prepare('SELECT platform, order_item_key FROM orders').all().map((r) => `${FAM(r.platform)}|${r.order_item_key}`));
+  const labelled = new Set(db.prepare("SELECT platform, order_item_key FROM orders WHERE source IS NOT 'order_report'").all().map((r) => `${FAM(r.platform)}|${r.order_item_key}`));
   const buyers = buyerSummaries(db, {});
 
   const items = [];
@@ -127,9 +133,9 @@ export function findAnomalies(db, f = {}, { today = localToday(), reviewed = fal
       const actual = exShip(l);
       if (expected != null && expected - actual >= payoutGap) {
         add('payout_low', l, {
-          title: `Paid ${rs(l.settled_net)} on a ${rs(l.total_paise)} sale`,
+          title: `Paid ${rs(l.settled_net)} on a ${rs(saleBase(l))} sale`,
           detail: `Before shipping, ${pct(actual)} of the sale reached you; this product usually keeps about ${pct(expected)} on ${l.platform}.`,
-          amountPaise: -Math.round((expected - actual) * l.total_paise),
+          amountPaise: -Math.round((expected - actual) * saleBase(l)),
         });
       }
     }
@@ -178,7 +184,7 @@ export function findAnomalies(db, f = {}, { today = localToday(), reviewed = fal
         && !labelled.has(`${FAM(l.platform)}|${l.order_item_key}`)) {
       add('no_label', l, {
         title: `Order ${l.order_id || ''} is not on the ${l.sale_date} labels`,
-        detail: `There is a ${l.line_source === 'payment' ? 'payment' : 'return'} for it, and labels for that day were uploaded, but not this one.`,
+        detail: `There is ${{ payment: 'a payment', order: 'an orders-report line' }[l.line_source] || 'a return'} for it, and labels for that day were uploaded, but not this one.`,
       });
     }
 
@@ -205,11 +211,12 @@ export function findAnomalies(db, f = {}, { today = localToday(), reviewed = fal
       }
       const usualComm = commissionBase.get(`${l.platform}|${l.code}`);
       const comm = -(l.commission || 0);
-      if (usualComm && comm / l.total_paise >= usualComm * feeJump && comm - usualComm * l.total_paise >= 1000) {
+      const base = saleBase(l);
+      if (usualComm && comm / base >= usualComm * feeJump && comm - usualComm * base >= 1000) {
         add('commission_high', l, {
-          title: `Commission ${rs(comm)} (${pct(comm / l.total_paise)} of the sale)`,
+          title: `Commission ${rs(comm)} (${pct(comm / base)} of the sale)`,
           detail: `For ${l.code} on ${l.platform} it is usually about ${pct(usualComm)}.`,
-          amountPaise: -Math.round(comm - usualComm * l.total_paise),
+          amountPaise: -Math.round(comm - usualComm * base),
         });
       }
       if (e.profit != null && e.profit < 0) {

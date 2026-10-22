@@ -78,7 +78,9 @@ const ADDED_COLUMNS = {
   },
   returns: { dispatch_date: 'TEXT', price_paise: 'INTEGER', invoice_no: 'TEXT', invoice_date: 'TEXT', tracking_id: 'TEXT' },
   // Buyer details from labels: kept in this local database only, never sent to Gemini.
-  orders: { buyer_name: 'TEXT', buyer_key: 'TEXT', ship_address: 'TEXT', ship_city: 'TEXT', payment_mode: 'TEXT', awb: 'TEXT' },
+  // source: NULL for a label/invoice or cancellations file, 'order_report' for a line
+  // known only from an orders report (no invoice yet).
+  orders: { buyer_name: 'TEXT', buyer_key: 'TEXT', ship_address: 'TEXT', ship_city: 'TEXT', payment_mode: 'TEXT', awb: 'TEXT', source: 'TEXT' },
 };
 
 // Indexes on added columns, created once the columns exist.

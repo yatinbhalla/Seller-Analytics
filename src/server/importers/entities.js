@@ -11,6 +11,8 @@ export const ENTITIES = {
       'ship_state', 'ship_pincode', 'cancelled',
       // From the label (or the cancellations file); local database only.
       'buyer_name', 'buyer_key', 'ship_address', 'ship_city', 'payment_mode', 'awb',
+      // 'order_report' when the line is known only from an orders report.
+      'source',
     ],
   },
   return: {
@@ -72,10 +74,17 @@ export const removeRow = (db, entity, key) => stmts(db)[entity].remove.run(key);
  *   (price, GST, platform) stays; a gap the invoice left is filled.
  * - Cancelled is final. An invoice uploaded after the cancellation must not bring the
  *   line back into sales, stock and packaging.
+ * - An orders report knows less than an invoice. Over an invoice it only fills gaps
+ *   (and can cancel); an invoice over an orders-report line replaces it.
  */
 export function mergeOrder(existing, incoming) {
   if (!existing) return incoming;
   const known = pick('order', existing);
+  if (isOrderReport(incoming) && !isOrderReport(known)) {
+    const merged = { ...known, cancelled: known.cancelled || incoming.cancelled ? 1 : 0 };
+    for (const c of ENTITIES.order.columns) if (merged[c] == null && incoming[c] != null && c !== 'source') merged[c] = incoming[c];
+    return merged;
+  }
   if (incoming.cancelled) {
     const merged = { ...known, cancelled: 1 };
     for (const c of ENTITIES.order.columns) if (merged[c] == null && incoming[c] != null) merged[c] = incoming[c];
@@ -83,6 +92,8 @@ export function mergeOrder(existing, incoming) {
   }
   return { ...incoming, cancelled: known.cancelled ? 1 : 0 };
 }
+
+export const isOrderReport = (order) => order?.source === 'order_report';
 
 /**
  * Merge what a returns file says into what is already known about that return.

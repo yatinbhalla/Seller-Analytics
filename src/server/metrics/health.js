@@ -23,10 +23,11 @@ export function dataHealth(db, today = localToday()) {
   for (let i = 13; i >= 0; i--) days.push(shift(today, -i));
   const invoiced = db
     .prepare(`SELECT ${FAM('o')} AS fam, COALESCE(invoice_date, order_date) AS d, COUNT(*) AS n
-                FROM orders o WHERE COALESCE(invoice_date, order_date) >= ? GROUP BY fam, d`)
+                FROM orders o WHERE COALESCE(invoice_date, order_date) >= ? AND source IS NOT 'order_report' GROUP BY fam, d`)
     .all(days[0]);
   const hit = new Set(invoiced.map((r) => `${r.fam}|${r.d}`));
-  const anyInvoices = (fam) => invoiced.some((r) => r.fam === fam) || db.prepare(`SELECT 1 FROM orders o WHERE ${FAM('o')} = ? LIMIT 1`).get(fam);
+  const anyInvoices = (fam) => invoiced.some((r) => r.fam === fam)
+    || db.prepare(`SELECT 1 FROM orders o WHERE ${FAM('o')} = ? AND source IS NOT 'order_report' LIMIT 1`).get(fam);
   const missingInvoiceDays = ['flipkart', 'meesho']
     .filter((fam) => anyInvoices(fam))
     .map((fam) => ({ platform: fam, days: days.filter((d) => !hit.has(`${fam}|${d}`)) }));
@@ -47,7 +48,8 @@ export function dataHealth(db, today = localToday()) {
     .all(shift(today, -staleDays));
 
   const noInvoiceWhere = `s.order_item_key IS NOT NULL
-                 AND NOT EXISTS (SELECT 1 FROM orders o WHERE ${FAM('o')} = ${FAM('s')} AND o.order_item_key = s.order_item_key)`;
+                 AND NOT EXISTS (SELECT 1 FROM orders o WHERE ${FAM('o')} = ${FAM('s')} AND o.order_item_key = s.order_item_key
+                                   AND o.source IS NOT 'order_report')`;
   const paymentsWithoutInvoice = db
     .prepare(`SELECT s.platform, s.order_item_key, s.sku, s.payment_date, s.net_paise
                 FROM settlement_lines s WHERE ${noInvoiceWhere}

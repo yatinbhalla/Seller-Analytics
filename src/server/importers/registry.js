@@ -4,12 +4,15 @@ import flipkartInvoices from './flipkart/invoices.js';
 import flipkartSettlement from './flipkart/settlement.js';
 import flipkartReturns from './flipkart/returns.js';
 import flipkartCancellations from './flipkart/cancellations.js';
+import flipkartOrders from './flipkart/orders.js';
 import meeshoInvoices from './meesho/invoices.js';
 import meeshoPayments from './meesho/payments.js';
 import meeshoReturns from './meesho/returns.js';
+import meeshoOrders from './meesho/orders.js';
 
 export const IMPORTERS = [
-  flipkartInvoices, flipkartSettlement, flipkartReturns, flipkartCancellations, meeshoInvoices, meeshoPayments, meeshoReturns,
+  flipkartInvoices, flipkartSettlement, flipkartReturns, flipkartCancellations, flipkartOrders,
+  meeshoInvoices, meeshoPayments, meeshoReturns, meeshoOrders,
 ];
 
 /**

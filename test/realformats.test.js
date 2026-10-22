@@ -327,3 +327,103 @@ describe('Flipkart cancelled orders (real layout)', () => {
     });
   });
 });
+
+describe('Orders reports (real layouts)', () => {
+  const MS_HEAD = ['Reason for Credit Entry', 'Sub Order No', 'Catalog ID', 'Order Date', 'Order source', 'Customer State', 'Product Name', 'SKU', 'Size',
+    'Quantity', 'Supplier Listed Price (Incl. GST + Commission)', 'Supplier Discounted Price (Incl GST and Commision)', 'Packet Id'];
+  const msRow = (status, sub, sku, packet = 'KP4TEST0001', price = '165.0', qty = '1') =>
+    [status, sub, '514535947', '2026-10-19', '', 'Haryana', 'Table Cover', sku, 'Free Size', qty, price, price, packet];
+  const msOrders = (rows) => csv([MS_HEAD, ...rows]);
+
+  const FK_HEAD = ['order_item_id', 'order_id', 'fulfilment_source', 'fulfilment_type', 'order_date', 'order_approval_date', 'order_item_status', 'sku',
+    'fsn', 'product_title', 'quantity', 'order_cancellation_date', 'return_id', 'dispatched_date', 'order_delivery_date'];
+  const fkRow = (o) => FK_HEAD.map((h) => o[h] ?? '');
+  const fkOrders = (rows) => xlsx({ Help: [['How to read this report']], Orders: [FK_HEAD, ...rows.map(fkRow)] });
+
+  it('reads the Meesho orders report: cancelled lines, packets, GST estimated', async () => {
+    const db = makeDb();
+    const [s] = await importAll(db, [{
+      buffer: msOrders([
+        msRow('DELIVERED', '1001_1', 'WH_MFO/1', 'KP4A'), msRow('DELIVERED', '1001_2', 'TC_BT/1', 'KP4A'),
+        msRow('CANCELLED', '1002_1', 'TC_BT/2', ''), msRow('SHIPPED', '1003_1', 'WH_MFO/3', 'KP4B', '120.0', '2'),
+      ]),
+      fileName: 'Orders_2026-09-22_2026-10-21_2026-10-23_1_42-1_47_1234567.csv',
+    }]);
+    expect(s.summary).toMatchObject({ kind: 'meesho.orders', new: 4, rejected: 0, dateFrom: '2026-10-19' });
+    const rows = db.prepare('SELECT order_item_key, shipment_key, cancelled, total_paise, qty, source FROM orders ORDER BY order_item_key').all();
+    expect(rows).toEqual([
+      { order_item_key: '1001_1', shipment_key: 'pkt:KP4A', cancelled: 0, total_paise: 16500, qty: 1, source: 'order_report' },
+      { order_item_key: '1001_2', shipment_key: 'pkt:KP4A', cancelled: 0, total_paise: 16500, qty: 1, source: 'order_report' },
+      { order_item_key: '1002_1', shipment_key: 'sub:1002_1', cancelled: 1, total_paise: 16500, qty: 1, source: 'order_report' },
+      { order_item_key: '1003_1', shipment_key: 'pkt:KP4B', cancelled: 0, total_paise: 24000, qty: 2, source: 'order_report' },
+    ]);
+    const lines = loadLines(db, {});
+    expect(lines.map((l) => l.order_item_key).sort()).toEqual(['1001_1', '1001_2', '1003_1']);
+    expect(lines.find((l) => l.order_item_key === '1001_1')).toMatchObject({ line_source: 'order', invoice_missing: 1, gst_estimated: 1, total_paise: 16500 });
+    // Two packets, two lots of ₹7.
+    expect(overview(db, {}).total.packaging).toBe(1400);
+  });
+
+  it('never lets an orders report overwrite an invoice, and lets a later invoice replace it without a money check', async () => {
+    const label = { buffer: pdf([MS_LABEL()]), fileName: 'Sub_Order_Labels.pdf' };
+    const report = { buffer: msOrders([msRow('DELIVERED', '414260587900711500_1', 'TC_NBC/92281', 'KP4X', '170.0')]), fileName: 'Orders.csv' };
+    const invoiced = { invoice_no: 'abcde279446', total_paise: 16500, taxable_paise: 15714, source: null };
+
+    // Invoice first, then the report: the invoice's figures stay.
+    const a = makeDb();
+    await importAll(a, [label]);
+    const [r] = await importAll(a, [report]);
+    expect(r.summary).toMatchObject({ rejected: 0, money_changed: 0 });
+    expect(a.prepare('SELECT invoice_no, total_paise, taxable_paise, source FROM orders').get()).toEqual(invoiced);
+
+    // Report first, then the invoice: it replaces the report line, nothing to confirm.
+    const b = makeDb();
+    await importAll(b, [report]);
+    const [i] = await importAll(b, [label]);
+    expect(i.summary).toMatchObject({ rejected: 0, money_changed: 0, update: 1 });
+    expect(b.prepare('SELECT invoice_no, total_paise, taxable_paise, source FROM orders').get()).toEqual(invoiced);
+
+    // Both in one upload, either way round.
+    for (const files of [[label, report], [report, label]]) {
+      const c = makeDb();
+      const staged = await importAll(c, files);
+      expect(staged.every((x) => x.summary.rejected === 0)).toBe(true);
+      expect(c.prepare('SELECT invoice_no, total_paise, source FROM orders').all()).toEqual([{ invoice_no: 'abcde279446', total_paise: 16500, source: null }]);
+    }
+  });
+
+  it('cancels an invoiced line the report says was cancelled', async () => {
+    const db = makeDb();
+    await importAll(db, [{ buffer: pdf([MS_LABEL()]), fileName: 'labels.pdf' }]);
+    await importAll(db, [{ buffer: msOrders([msRow('CANCELLED', '414260587900711500_1', 'TC_NBC/92281', '')]), fileName: 'Orders.csv' }]);
+    expect(db.prepare('SELECT cancelled, invoice_no, total_paise FROM orders').get()).toEqual({ cancelled: 1, invoice_no: 'abcde279446', total_paise: 16500 });
+  });
+
+  it('reads the Flipkart orders report: wrapped SKUs, repeated items, no price, cancelled only before dispatch', async () => {
+    const db = makeDb();
+    const [s] = await importAll(db, [{
+      buffer: fkOrders([
+        { order_item_id: 'OI:1', order_id: 'OD1', order_date: '2026-10-20 22:45:37', order_item_status: 'DELIVERED', sku: '"""SKU:WH_MFO/1"""', quantity: '1', dispatched_date: '2026-10-21' },
+        { order_item_id: 'OI:4', order_id: 'OD1', order_date: '2026-10-20 22:45:37', order_item_status: 'DELIVERED', sku: '"""SKU:WH_MFO/1"""', quantity: '2', dispatched_date: '2026-10-21' },
+        { order_item_id: '2', order_id: 'OD2', order_date: '2026-10-20', order_item_status: 'CANCELLED', sku: 'TC_BT/1', quantity: '1', order_cancellation_date: '2026-10-20' },
+        { order_item_id: '3', order_id: 'OD3', order_date: '2026-10-20', order_item_status: 'CANCELLED', sku: 'TC_BT/1', quantity: '1',
+          order_cancellation_date: '2026-10-23', dispatched_date: '2026-10-21' },
+      ]),
+      fileName: 'd210fb41-8b8e-4ce8-b4ed-82b8c1698850_1792700006000.xlsx',
+    }]);
+    expect(s.summary).toMatchObject({ kind: 'flipkart.orders', new: 3, rejected: 0 });
+    expect(db.prepare('SELECT order_item_key, code, qty, order_date, cancelled, total_paise FROM orders ORDER BY order_id').all()).toEqual([
+      { order_item_key: 'OD1:WH_MFO/1', code: 'WH_MFO', qty: 3, order_date: '2026-10-20', cancelled: 0, total_paise: 0 },
+      { order_item_key: 'OD2:TC_BT/1', code: 'TC_BT', qty: 1, order_date: '2026-10-20', cancelled: 1, total_paise: 0 },
+      { order_item_key: 'OD3:TC_BT/1', code: 'TC_BT', qty: 1, order_date: '2026-10-20', cancelled: 0, total_paise: 0 },
+    ]);
+    // With no payment yet, the price falls back to the list price.
+    expect(loadLines(db, {}).find((l) => l.order_item_key === 'OD1:WH_MFO/1')).toMatchObject({ line_source: 'order', price_estimated: 1, total_paise: 3 * 28900 });
+  });
+
+  it('reads an empty Flipkart orders report as nothing to import', async () => {
+    const db = makeDb();
+    const [s] = await importAll(db, [{ buffer: fkOrders([]), fileName: 'orders.xlsx' }]);
+    expect(s).toMatchObject({ status: 'staged', summary: { kind: 'flipkart.orders', new: 0, rejected: 0 } });
+  });
+});

@@ -153,6 +153,7 @@ function FileResult({ r }) {
         {s.batchDupes > 0 && <span><b className="text-ink">{n(s.batchDupes)}</b> repeated in this upload (merged)</span>}
         {s.skipped > 0 && <span><b className="text-ink">{n(s.skipped)}</b> {s.skipLabel}</span>}
         {s.pages != null && <span>{n(s.pages)} pages → {n(s.invoicesFound)} invoice lines</span>}
+        {/\.orders$/.test(s.kind || '') && <span>{n(s.invoicesFound)} order lines</span>}
         {s.returnsOpen + s.returnsClosed > 0 && <span>{n(s.returnsOpen)} open · {n(s.returnsClosed)} closed returns</span>}
         {s.moneyTotal !== 0 && <span>Total {rs(s.moneyTotal)}</span>}
         {s.dateFrom && <span>{niceDate(s.dateFrom)} – {niceDate(s.dateTo)}</span>}

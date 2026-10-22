@@ -5,7 +5,7 @@ import { DATA_DIR } from '../db/db.js';
 import { resolveCode } from '../catalog/sku.js';
 import { detectFile } from './registry.js';
 import { contentHash, MONEY_FIELDS, moneyOf, naturalKey, sha256 } from './keys.js';
-import { getRow, mergeOrder, mergeReturn, pick } from './entities.js';
+import { getRow, isOrderReport, mergeOrder, mergeReturn, pick } from './entities.js';
 
 const ACCOUNT = 'main';
 
@@ -113,11 +113,13 @@ function stageRows(db, importId, parsed, batchRows) {
       if (seen) {
         const prev = db.prepare('SELECT payload FROM staged_rows WHERE import_id = ? AND entity = ? AND natural_key = ?').get(seen.importId, entity, key);
         const prevPayload = JSON.parse(prev.payload);
-        // An invoice and a cancellation of the same line merge; two different invoices
-        // for one line still fall through to the conflict below.
-        const cancelMerge = entity === 'order' && !!prevPayload.cancelled !== !!payload.cancelled;
-        if (entity === 'return' || cancelMerge) {
-          const merged = cancelMerge ? mergeOrder(prevPayload, payload) : mergeReturn({ ...prevPayload, status: prevPayload.status }, payload);
+        // An invoice and a cancellation of the same line merge, and so do an invoice and
+        // an orders-report line; two different invoices for one line still fall through
+        // to the conflict below.
+        const orderMerge = entity === 'order'
+          && (!!prevPayload.cancelled !== !!payload.cancelled || isOrderReport(prevPayload) !== isOrderReport(payload));
+        if (entity === 'return' || orderMerge) {
+          const merged = orderMerge ? mergeOrder(prevPayload, payload) : mergeReturn({ ...prevPayload, status: prevPayload.status }, payload);
           const { action, diff } = compare(db, entity, key, merged);
           updateStaged.run(JSON.stringify({ ...merged, content_hash: contentHash(merged) }), action, diff, seen.importId, entity, key);
           s.batchDupes++;
@@ -179,7 +181,10 @@ export function compare(db, entity, key, payload) {
   for (const [k, v] of Object.entries(payload)) {
     if (k in existing && existing[k] !== v) changed[k] = { from: existing[k], to: v };
   }
-  const moneyMoved = MONEY_FIELDS[entity].some((f) => f in changed);
+  // An invoice replacing an orders-report line is the real figure arriving, not a
+  // change to confirm.
+  const invoiceArrived = entity === 'order' && isOrderReport(existing) && !isOrderReport(payload);
+  const moneyMoved = !invoiceArrived && MONEY_FIELDS[entity].some((f) => f in changed);
   return { action: moneyMoved ? 'money_changed' : 'update', diff: JSON.stringify(changed) };
 }
 

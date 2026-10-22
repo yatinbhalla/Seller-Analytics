@@ -54,6 +54,13 @@ Every Supplier Panel address carries a short code for the account, written `<slu
 - A day with no payment comes back as "No data is available for these dates", which the app now accepts as an empty day.
 - Rows that overlap with a file already imported from the details page are recognised as unchanged.
 
+### 4. Orders report (on request, not nightly yet)
+
+Orders → **Download Orders Data ▾** (top right) → **Select Date Range** → From/To (at most 1 month) → **Export data**. The file appears under "Exported Files" in the same menu after a minute or two; reopen the menu to see it.
+- The file is `Orders_<from>_<to>_<export date>_<hour window>_<supplier-id>.csv`, one row per sub-order.
+- First walked through on 23 Oct for 22 Sep–21 Oct: 2,560 rows (1,967 delivered, 361 shipped, 128 cancelled, 100 RTO, 2 lost).
+- The column "Reason for Credit Entry" is the order status. The price is the supplier's price incl. GST, the same figure as the invoice's item total.
+
 ### Already handled in the app
 
 - `.zip` uploads are unpacked and the Excel inside is imported. A second download of the same zip is recognised as the same file.
@@ -120,7 +127,14 @@ Every page is under `https://seller.flipkart.com/index.html#dashboard/…`.
 - One file covers every prepaid and postpaid NEFT in the range.
 - The 1–10 Oct report requested on 21 Oct had all 5 NEFTs paid on 5, 7 and 9 Oct, matching the list.
 - It is the same file as `samples/flipkart/payment (2).xlsx`, so the app already reads it.
-- The Request New Report form itself hasn't been walked through yet.
+- The Request New Report form for this report hasn't been walked through yet.
+
+### 5. Orders report (on request, not nightly yet)
+
+Reports Centre → **Request New Report** → **Fulfilment Reports** → Orders → **Request Report** → One Time Request → Select Date Range → **custom** → click the start and end day → **Submit**. It was Generated within a minute on 23 Oct; download it from the Reports list.
+- The file is `<request id>_<timestamp>.xlsx`, the same shape of name as a payment report. The app tells them apart by their columns.
+- Sheets: "Help" and "Orders". 22 Sep–21 Oct had 602 order items. Statuses seen: DELIVERED, READY_TO_SHIP, RETURN_REQUESTED, RETURNED, CANCELLED, APPROVED.
+- No price column. SKUs come wrapped as `"""SKU:WH_P/1"""`; the app unwraps them.
 
 ## How the nightly job runs
 

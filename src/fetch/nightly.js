@@ -43,6 +43,7 @@ const DOWNLOAD_NAMES = [
   /^meesho_.*PAYMENT.*\.zip$/i,
   /^off-returns-all-api_.*\.csv$/i,
   /^Cancelled-Orders.*\.csv$/i,
+  /^Orders_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_.*\.csv$/i, // Meesho orders report
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_\d+( \(\d+\))?\.xlsx$/i, // Flipkart payment reports
 ];
 

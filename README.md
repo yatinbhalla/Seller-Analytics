@@ -145,6 +145,7 @@ Open **Import files** and drop in the day's files from both platforms:
 | Return created | returns report (approved in a date range) | returns: in transit |
 | Return closure | returns report (closed in a date range) | returns: delivered |
 | Cancellations | cancelled orders list | — |
+| Orders report | Reports Centre → Fulfilment Reports → Orders | Orders → Download Orders Data |
 
 The preview also lists any **new SKU codes**, which you can give a cost right there. Nothing is saved until you press **Commit**.
 
@@ -167,6 +168,7 @@ The preview also lists any **new SKU codes**, which you can give a cost right th
   A step that could mean two order lines is skipped, never guessed. The Orders page marks a row "matched by …". When files disagree on an order's IDs, an alert is raised.
 - **Return created + return closed:** these merge into one return. A closed return is never reopened by an older file. A condition you set by hand beats one read from a file.
 - **Cancellations:** a cancellation before dispatch marks the line cancelled, and a later reprint of its label can't bring it back. Courier returns in the cancellations file are skipped, because the returns report already has them.
+- **Orders reports know less than an invoice:** an orders report only fills gaps in an invoiced line (or cancels it), and never changes its price or GST. An invoice uploaded later replaces the orders-report line without asking.
 - **Changed amounts:** if the same row comes back with a **different amount**, it waits for you to accept or refuse it.
 - **Strict parsing:**
   - IDs stay text, and anything Excel mangled into `1.2E+17` is refused.
@@ -195,6 +197,7 @@ The preview also lists any **new SKU codes**, which you can give a cost right th
 - **Costs** are per unit as sold: a 4-pack costs four pieces. A cost change takes effect from a date, so older orders keep the cost they had.
 - **History before the first invoice upload.** Payment and returns files reach back weeks.
   - An order known only from a payment file is still in every report. Its GST is estimated, and it never moves stock.
+  - An order known from an orders report is an order line like an invoiced one: it moves stock and carries its packet's ₹7, but its GST is estimated. Meesho's report gives the price as on the invoice; Flipkart's has no price, so it comes from the payment, else the list price.
   - A return of a sale from before the history counts in return reasons, but not in money or return rates.
 
 ---
@@ -328,8 +331,8 @@ Seller-Analytics/
 │   │   ├── 📁 catalog/               Lister sync · SKU parsing · costs & aliases
 │   │   ├── 📁 seed/                  costs.js (loader) · costs.example.js · costs.local.js (git-ignored)
 │   │   ├── 📁 importers/             detect → stage → commit → undo
-│   │   │   ├── 📁 flipkart/          invoices (PDF) · settlement · returns · cancellations
-│   │   │   ├── 📁 meesho/            invoices (PDF) · payments · returns
+│   │   │   ├── 📁 flipkart/          invoices (PDF) · settlement · returns · cancellations · orders
+│   │   │   ├── 📁 meesho/            invoices (PDF) · payments · returns · orders
 │   │   │   └── table.js · pdf.js · keys.js · entities.js · stage.js · commit.js
 │   │   ├── 📁 metrics/               lines.js (the one order-line query) · economics · reports · health · anomalies · customers
 │   │   ├── 📁 inventory/             Stock ledger and pack recipes

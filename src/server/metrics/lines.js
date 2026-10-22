@@ -15,6 +15,11 @@ import { getSetting } from '../db/db.js';
  * only follows invoices, which are what was actually dispatched after the opening
  * count.
  *
+ * A line from an orders report (source 'order_report') is an order line like an
+ * invoice's: it moves stock and carries its packet's ₹7. It has no GST split, so it
+ * is also flagged invoice_missing and estimated; line_source says 'order'. Flipkart's
+ * report has no price (stored as 0), so its price comes from the payment file.
+ *
  * Shopsy: a line is Shopsy's when its settlement or return says so, even if the
  * invoice did not.
  */
@@ -66,8 +71,9 @@ base AS (
   SELECT o.id,
          k.fam || '|main|' || k.order_item_key AS natural_key,
          k.order_item_key,
-         CASE WHEN o.id IS NULL THEN 1 ELSE 0 END AS invoice_missing,
-         CASE WHEN o.id IS NOT NULL THEN 'invoice' WHEN st.n_lines IS NOT NULL THEN 'payment' ELSE 'return' END AS line_source,
+         CASE WHEN o.id IS NULL OR o.source = 'order_report' THEN 1 ELSE 0 END AS invoice_missing,
+         CASE WHEN o.source = 'order_report' THEN 'order' WHEN o.id IS NOT NULL THEN 'invoice'
+              WHEN st.n_lines IS NOT NULL THEN 'payment' ELSE 'return' END AS line_source,
          COALESCE(o.order_id, st.order_id, r1.order_id) AS order_id,
          o.shipment_key, COALESCE(o.invoice_no, st.invoice_no, r1.invoice_no) AS invoice_no,
          COALESCE(o.invoice_date, o.order_date, st.dispatch_date, st.order_date, st.invoice_date,
@@ -79,7 +85,8 @@ base AS (
          COALESCE(o.code, st.code, r1.code) AS raw_code,
          COALESCE(o.qty, st.qty, r1.qty, 1) AS qty,
          o.gross_paise, o.discount_paise, o.taxable_paise, o.tax_paise,
-         COALESCE(o.total_paise, NULLIF(st.sale_gross, 0), r1.price_paise) AS known_total_paise,
+         COALESCE(CASE WHEN o.source = 'order_report' THEN NULLIF(o.total_paise, 0) ELSE o.total_paise END,
+                  NULLIF(st.sale_gross, 0), r1.price_paise) AS known_total_paise,
          -- Money on an order whose sale was paid before this history began: a later
          -- recovery or claim, or the refund and return charges of a sale paid earlier.
          CASE WHEN o.id IS NULL AND st.n_lines IS NOT NULL AND COALESCE(st.sale_gross, 0) = 0 THEN 1 ELSE 0 END AS adjustment_only,

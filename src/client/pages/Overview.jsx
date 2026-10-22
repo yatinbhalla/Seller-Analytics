@@ -33,7 +33,7 @@ export default function Overview() {
       {(t.costMissingLines > 0 || t.estimatedLines > 0 || t.noInvoiceLines > 0 || t.returnsBeforeHistory > 0) && (
         <Notice>
           {t.estimatedLines > 0 && <>{n(t.estimatedLines)} lines are not settled yet, so their payout is <b>estimated</b> from similar settled orders. </>}
-          {t.noInvoiceLines > 0 && <>{n(t.noInvoiceLines)} lines come from payment files with no invoice PDF uploaded — their GST is estimated and they do not move stock. </>}
+          {t.noInvoiceLines > 0 && <>{n(t.noInvoiceLines)} lines have no invoice PDF uploaded (they come from payment, returns or orders reports) — their GST is estimated, and only those from orders reports move stock.</>}
           {t.returnsBeforeHistory > 0 && <>{n(t.returnsBeforeHistory)} returns are for sales from before your first upload; they count in return reasons but not in money or return rates. </>}
           {t.costMissingLines > 0 && (
             <>
