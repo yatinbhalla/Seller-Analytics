@@ -1,6 +1,7 @@
 import { excelImporter } from '../excelImporter.js';
 import { field, required, soft } from '../table.js';
 import { date, id, int, paise, text } from '../../lib/parse.js';
+import { buyerKey, paymentMode } from '../../lib/buyer.js';
 import { parseSku } from '../../catalog/sku.js';
 import { orderItemKey } from '../keys.js';
 
@@ -16,7 +17,8 @@ import { orderItemKey } from '../keys.js';
  *     cancelled, which takes it out of sales, stock and packaging. If its invoice
  *     was already uploaded, what the invoice said is kept (see mergeOrder).
  *
- * The file carries the buyer's name and address; only state and PIN code are read.
+ * The buyer's name and address are kept on the order, in the local database only,
+ * so a buyer's cancellations show next to their other orders.
  */
 const spec = {
   required: ['orderId', 'sku', 'cancelledOn', 'cancelType'],
@@ -32,6 +34,11 @@ const spec = {
     state: ['State'],
     pincode: ['PIN Code', 'Pincode'],
     invoiceNo: ['Invoice Number'],
+    name: ['Address Name'],
+    address1: ['Address Line 1'],
+    address2: ['Address Line 2'],
+    city: ['City'],
+    paymentType: ['Payment Type'],
   },
 };
 
@@ -48,6 +55,8 @@ export default excelImporter({
     if (/^y/i.test(text(get('logisticsReturn')) || '')) return null;
     const key = orderItemKey('flipkart', { orderId, sku: parsed.sku });
     const invoiceNo = soft(id, get('invoiceNo'));
+    const pincode = text(get('pincode'));
+    const name = text(get('name'));
     return {
       entity: 'order',
       key,
@@ -68,8 +77,14 @@ export default excelImporter({
         tax_paise: null,
         total_paise: required('Total', field('Total', paise, get('total'))),
         ship_state: text(get('state')),
-        ship_pincode: text(get('pincode')),
+        ship_pincode: pincode,
         cancelled: 1,
+        buyer_name: name,
+        buyer_key: buyerKey(name, pincode),
+        ship_address: [text(get('address1')), text(get('address2'))].filter(Boolean).join(', ') || null,
+        ship_city: text(get('city')),
+        payment_mode: paymentMode(text(get('paymentType'))),
+        awb: null,
       },
     };
   },

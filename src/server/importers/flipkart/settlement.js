@@ -55,6 +55,7 @@ const spec = {
     shopsy: ['Shopsy Order'],
     invoiceId: ['Invoice ID'],
     invoiceDate: ['Invoice Date'],
+    shippingZone: ['Shipping Zone'],
   },
 };
 
@@ -132,6 +133,7 @@ export default excelImporter({
         gst_pct: null,
         invoice_no: soft(id, get('invoiceId')),
         invoice_date: soft(date, get('invoiceDate')),
+        shipping_zone: text(get('shippingZone')),
         breakdown_json: JSON.stringify({
           orderItemId,
           neftType: text(get('neftType')),

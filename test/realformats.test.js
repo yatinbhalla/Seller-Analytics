@@ -317,11 +317,13 @@ describe('Flipkart cancelled orders (real layout)', () => {
     expect(db.prepare('SELECT cancelled, total_paise FROM orders').all()).toEqual([{ cancelled: 1, total_paise: 25300 }]);
   });
 
-  it('records a cancellation that arrives before any invoice, with state and PIN only', async () => {
+  it('records a cancellation that arrives before any invoice, with its buyer', async () => {
     const db = makeDb();
     await importAll(db, [{ buffer: CANCELLED, fileName: 'Cancelled-Orders.csv' }]);
     const o = db.prepare('SELECT * FROM orders').get();
-    expect(o).toMatchObject({ cancelled: 1, code: 'WH_MFO', qty: 1, total_paise: 17800, order_date: '2026-10-21', ship_state: 'Uttar Pradesh', ship_pincode: '226017' });
-    expect(JSON.stringify(o)).not.toMatch(/Test Buyer|Example Street/);
+    expect(o).toMatchObject({
+      cancelled: 1, code: 'WH_MFO', qty: 1, total_paise: 17800, order_date: '2026-10-21', ship_state: 'Uttar Pradesh', ship_pincode: '226017',
+      buyer_name: 'Test Buyer', buyer_key: 'test buyer|226017', ship_address: '12 Example Street', ship_city: 'Lucknow', payment_mode: 'cod',
+    });
   });
 });

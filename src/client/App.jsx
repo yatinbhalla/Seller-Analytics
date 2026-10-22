@@ -12,12 +12,17 @@ import Import from './pages/Import.jsx';
 import DataHealth from './pages/DataHealth.jsx';
 import AskAI from './pages/AskAI.jsx';
 import Settings from './pages/Settings.jsx';
+import Alerts from './pages/Alerts.jsx';
+import Customers from './pages/Customers.jsx';
+import CustomerDetail from './pages/CustomerDetail.jsx';
 import { useApi } from './lib/api.js';
 
 const NAV = [
   { to: '/', label: 'Overview', end: true },
+  { to: '/alerts', label: 'Alerts' },
   { to: '/products', label: 'Products' },
   { to: '/orders', label: 'Orders' },
+  { to: '/customers', label: 'Customers' },
   { to: '/returns', label: 'Returns' },
   { to: '/pnl', label: 'P&L' },
   { to: '/inventory', label: 'Stock' },
@@ -30,15 +35,17 @@ const NAV = [
 ];
 
 // Pages whose content is scoped by the date/platform filters.
-const FILTERED = ['/', '/products', '/orders', '/returns', '/pnl', '/tax'];
+const FILTERED = ['/', '/alerts', '/products', '/orders', '/customers', '/returns', '/pnl', '/tax'];
 
 export default function App() {
   const { pathname } = useLocation();
   const showFilters = FILTERED.includes(pathname) || pathname.startsWith('/products/');
   const { data: health } = useApi('/reports/health');
+  const { data: alerts } = useApi('/reports/alerts');
   const problems = health
     ? health.unknownCodes.length + health.codesWithoutCost.length + (health.integrity.ok ? 0 : 1)
     : 0;
+  const badges = { '/health': problems, '/alerts': alerts ? alerts.counts.high : 0 };
 
   return (
     <div className="flex min-h-screen">
@@ -63,9 +70,9 @@ export default function App() {
                 }
               >
                 {n.label}
-                {n.to === '/health' && problems > 0 && (
-                  <span className="rounded-full bg-bad px-1.5 text-[11px] font-semibold text-white" title="Items need attention">
-                    {problems}
+                {badges[n.to] > 0 && (
+                  <span className="rounded-full bg-bad px-1.5 text-[11px] font-semibold text-white" title={n.to === '/alerts' ? 'High-severity alerts' : 'Items need attention'}>
+                    {badges[n.to]}
                   </span>
                 )}
               </NavLink>
@@ -88,6 +95,9 @@ export default function App() {
           <Route path="/products" element={<Products />} />
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/orders" element={<Orders />} />
+          <Route path="/alerts" element={<Alerts />} />
+          <Route path="/customers" element={<Customers />} />
+          <Route path="/customers/:key" element={<CustomerDetail />} />
           <Route path="/returns" element={<Returns />} />
           <Route path="/pnl" element={<PnL />} />
           <Route path="/inventory" element={<Inventory />} />

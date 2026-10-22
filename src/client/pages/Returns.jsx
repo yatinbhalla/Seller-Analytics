@@ -4,6 +4,7 @@ import { useFilters } from '../lib/filters.jsx';
 import { n, niceDate, pct, PLATFORMS, rs } from '../lib/format.js';
 import { Card, Empty, ErrorBox, Loading, Notice, PageHeader, PlatformTag, Select, Stat } from '../components/ui.jsx';
 import { Legend } from '../components/Charts.jsx';
+import AreaReturns from '../components/AreaReturns.jsx';
 
 export default function Returns() {
   const { filters } = useFilters();
@@ -124,6 +125,7 @@ export default function Returns() {
           </div>
         )}
       </Card>
+      <AreaReturns />
     </Loading>
   );
 }

@@ -148,17 +148,15 @@ describe.skipIf(!has)("the seller's real sample files", async () => {
     for (const r of rows) expect(r.shipment_key).toMatch(/\d{4,}/);
   });
 
-  it('keeps no buyer name or street in the database', async () => {
-    const dump = JSON.stringify(db.prepare('SELECT * FROM orders').all()) + JSON.stringify(db.prepare('SELECT * FROM returns').all());
-    for (const s of [...byKind(staged, 'flipkart.invoices'), ...byKind(staged, 'meesho.invoices')]) {
-      const pages = pdfPages[s.fileName];
-      for (const p of pages) {
-        const i = p.lines.findIndex((l) => /customer\s*address|shipping\/customer address/i.test(l));
-        const nameLine = p.lines[i + 1] || '';
-        const name = nameLine.replace(/^Name:\s*/i, '').replace(/,.*$/, '').trim();
-        if (name.length > 4) expect(dump.includes(name), `buyer name from ${s.fileName}`).toBe(false);
-      }
+  it('reads a buyer, PIN code, city, payment mode and AWB from every label page', async () => {
+    // Counts only: real buyer details never go into a test message.
+    const orders = db.prepare('SELECT buyer_name, buyer_key, ship_pincode, ship_city, payment_mode, awb FROM orders').all();
+    expect(orders.length).toBeGreaterThan(0);
+    for (const field of ['buyer_name', 'buyer_key', 'ship_pincode', 'ship_city', 'payment_mode', 'awb']) {
+      expect(orders.filter((o) => !o[field]).length, `orders without ${field}`).toBe(0);
     }
+    // Courier lines on Meesho labels are not mistaken for the street.
+    expect(orders.filter((o) => /\bpickup \d|^valmo$|-R\d\b/i.test(o.ship_address || '')).length).toBe(0);
   });
 
   it('a second upload of every file is refused as already imported', async () => {

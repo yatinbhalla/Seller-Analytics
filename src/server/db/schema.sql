@@ -331,3 +331,14 @@ CREATE TABLE IF NOT EXISTS event_skus (
   discount_pct     REAL,
   PRIMARY KEY (event_id, code)
 );
+
+-- ─── Alerts ────────────────────────────────────────────────────────────────────
+
+-- The seller's decision on an alert (metrics/anomalies.js), by the alert's stable key
+-- (type + the row it is about). Alerts themselves are computed fresh, never stored.
+CREATE TABLE IF NOT EXISTS anomaly_reviews (
+  key          TEXT PRIMARY KEY,
+  status       TEXT NOT NULL CHECK (status IN ('ok', 'follow_up')),
+  note         TEXT,
+  reviewed_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);

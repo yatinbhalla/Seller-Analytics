@@ -399,6 +399,20 @@ function General() {
           </span>
         </Field>
         <Field label="Estimate unsettled payouts from the last (days)" hint="Payout of an unsettled order is estimated from what similar settled orders actually paid."><Input type="number" min="7" value={v.estimate_window_days} onChange={(e) => set('estimate_window_days', e.target.value)} className="w-24" /></Field>
+        <div className="mt-2 border-t border-line pt-3 text-xs font-medium uppercase tracking-wide text-muted">Alerts — what counts as odd</div>
+        <Field label="Payout below usual by (points of the sale)" hint="Compared with what this product usually keeps on that platform, before shipping.">
+          <Input type="number" min="1" value={v.alert_payout_gap_pct} onChange={(e) => set('alert_payout_gap_pct', e.target.value)} className="w-20" />
+        </Field>
+        <Field label="Shipping or commission above usual by (%)" hint="Flipkart shipping is compared within its shipping zone.">
+          <Input type="number" min="1" value={v.alert_fee_jump_pct} onChange={(e) => set('alert_fee_jump_pct', e.target.value)} className="w-20" />
+        </Field>
+        <Field label="Selling price away from the lister's price by (%)">
+          <Input type="number" min="1" value={v.alert_price_gap_pct} onChange={(e) => set('alert_price_gap_pct', e.target.value)} className="w-20" />
+        </Field>
+        <Field label="Large quantity on one order (units)"><Input type="number" min="2" value={v.alert_bulk_qty} onChange={(e) => set('alert_bulk_qty', e.target.value)} className="w-20" /></Field>
+        <Field label="Wait for a return's file row (days)" hint="A return charged in a payment, with no returns-file row after this long, is flagged.">
+          <Input type="number" min="1" value={v.alert_return_wait_days} onChange={(e) => set('alert_return_wait_days', e.target.value)} className="w-20" />
+        </Field>
         <div><Button variant="primary" onClick={save} disabled={!draft}>Save</Button></div>
       </div>
     </Card>

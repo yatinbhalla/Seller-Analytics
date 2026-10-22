@@ -11,7 +11,7 @@
 [![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Recharts](https://img.shields.io/badge/Recharts-3-22B5BF)](https://recharts.org)
 [![Gemini](https://img.shields.io/badge/Gemini-Flash--Lite-4285F4?logo=google&logoColor=white)](https://ai.google.dev)
-[![Tests](https://img.shields.io/badge/tests-77_passing-2EA44F?logo=vitest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-89_passing-2EA44F?logo=vitest&logoColor=white)](#-testing)
 [![License: PolyForm NC](https://img.shields.io/badge/License-PolyForm_Noncommercial-yellow.svg)](LICENSE.md)
 
 **Built end-to-end by a PM-Builder · React + Node + SQLite + Gemini · Runs 100% locally**
@@ -29,6 +29,8 @@
 - [🛡️ Why Uploads Can't Corrupt or Double-Count](#️-why-uploads-cant-corrupt-or-double-count)
 - [🧮 How the Numbers Work](#-how-the-numbers-work)
 - [📦 Products, SKUs & Stock](#-products-skus--stock)
+- [🚨 Alerts](#-alerts)
+- [🧑‍🤝‍🧑 Customers & Areas](#-customers--areas)
 - [🌙 Nightly Auto-Download](#-nightly-auto-download)
 - [🤖 Ask AI (Gemini)](#-ask-ai-gemini)
 - [📄 Pages](#-pages)
@@ -90,7 +92,7 @@ It merges them per order line and works out real profit per product, pack size, 
   - payment windows
   - packs of 1, 2 and 4 drawing on one shared stock shelf
 - **Automated** the daily routine. A nightly Claude scheduled task downloads the reports in the seller's own Chrome, and a local script works out what's missing, imports it and raises a WhatsApp alert only when something needs attention.
-- **Validated** with 77 automated tests, including golden tests that run on real export files when they are present.
+- **Validated** with 89 automated tests, including golden tests that run on real export files when they are present.
 
 ---
 
@@ -109,7 +111,9 @@ It merges them per order line and works out real profit per product, pack size, 
 - 🧾 **TCS & TDS on their own page.** They're held from payouts and claimed back, so they're never in profit.
 - 🌙 **Nightly auto-download.** Missed nights are caught up, and nothing is downloaded twice.
 - 🤖 **Ask your data.** Gemini answers questions by calling the app's own metric functions, so it explains numbers and never invents them.
-- 🔒 **Local-first.** The server listens on localhost only. Buyer names, addresses and phone numbers are never stored (only state and PIN code). Real cost prices live in a git-ignored file.
+- 🚨 **Alerts on odd figures.** For example: a low payout, a penalty or recovery, a return charged that no returns file shows, files that disagree on an order's IDs, a shipping fee above the usual weight slab, a sale at a loss.
+- 🧑‍🤝‍🧑 **Customers and areas.** Repeat buyers and how their orders went. Frequent returners. Return and RTO rates by state, city, PIN code, Flipkart zone and COD vs prepaid.
+- 🔒 **Local-first.** The server listens on localhost only. Buyer names and addresses from labels stay in the local database: never sent to Gemini, never in this repo. Real cost prices live in a git-ignored file.
 
 ---
 
@@ -155,6 +159,12 @@ The preview also lists any **new SKU codes**, which you can give a cost right th
   - a payment line by order item, type and settlement reference.
 
   Flipkart and Shopsy share one key space, so a Shopsy order seen as "Flipkart" in one file isn't counted twice.
+- **Files matched to their label by every ID they share:** some payment and return rows name an order differently from its label. Those rows are matched in turn by:
+  1. the invoice number;
+  2. the courier's AWB (an RTO comes back on the label's AWB);
+  3. on Flipkart, the order ID, when the order has a single line.
+
+  A step that could mean two order lines is skipped, never guessed. The Orders page marks a row "matched by …". When files disagree on an order's IDs, an alert is raised.
 - **Return created + return closed:** these merge into one return. A closed return is never reopened by an older file. A condition you set by hand beats one read from a file.
 - **Cancellations:** a cancellation before dispatch marks the line cancelled, and a later reprint of its label can't bring it back. Courier returns in the cancellations file are skipped, because the returns report already has them.
 - **Changed amounts:** if the same row comes back with a **different amount**, it waits for you to accept or refuse it.
@@ -210,6 +220,43 @@ Category (vertical)      e.g. Hanging Organizers
 
 ---
 
+## 🚨 Alerts
+
+Data Health shows what's *missing*. Alerts show what looks *wrong*: each figure is checked against your own usual numbers for that product and platform, with at least three settled orders before anything is called unusual.
+
+| Severity | Alert |
+|---|---|
+| **High** | Payout far below usual (before shipping, since Meesho's shipping depends on distance) · penalty, fine or recovery · paid for a cancelled order · a return charged that no returns file shows (once the files cover that time) · one invoice number on two orders · files disagree on an order's invoice number |
+| **Medium** | Order missing from that day's labels · RTO tracking number differs from the label's AWB · paid on a different amount than invoiced · Flipkart shipping above usual for its zone (often a wrong weight) · commission above usual · sold at a loss · new order from a frequent returner |
+| **Info** | Price far from your lister's price · large quantity on one order |
+
+- **On the Overview,** the **Needs attention** card counts the high and medium alerts, together with overdue payments and returns open too long.
+- **On the Alerts page,** each alert says what to do. **Mark OK** hides it for good; **Follow up** pins it to the top.
+- **Thresholds** are in Settings → General.
+- **Nightly:** the job reports new high-severity alerts on WhatsApp.
+
+---
+
+## 🧑‍🤝‍🧑 Customers & Areas
+
+Buyer names and addresses come from the label PDFs (and Flipkart's cancellations file). Payments and returns reach a buyer through their order.
+
+- **One buyer** is one name at one PIN code, on any platform. Titles, case and punctuation are ignored, so "Mr. Ramesh Kumar" and "RAMESH KUMAR" are the same buyer.
+- **Customers page:** every buyer with their orders, kept, returned, RTO and cancelled counts, return rate and profit. Flags:
+  - **Repeat buyer**
+  - **Frequent returner:** 2+ returns, or half their orders
+  - **RTO risk:** an RTO on a COD order, or 2+ RTOs
+  - **Good customer**
+
+  Each buyer has a page with their whole order history.
+- **Orders page:** shows each order's buyer and how their other orders went.
+- **Returns by area:** rates and return cost by state. Drill down to city, then PIN code, or switch to Flipkart's shipping zone; COD vs prepaid is split out too. An area is marked *above average* only with 5+ orders.
+- **Privacy:** none of this leaves your PC.
+  - Gemini gets area totals (state, city, zone) and alert counts only, never a name, street or PIN code. A test checks every AI tool for this.
+  - The database stays in the git-ignored `data/` folder.
+
+---
+
 ## 🌙 Nightly Auto-Download
 
 The marketplaces offer no free API for these reports, so the download is done the way the seller does it, in the browser.
@@ -240,10 +287,10 @@ GEMINI_API_KEY=your_key
 ```
 
 - **Ask your data:** questions like "Why did Black Floral's profit fall on Meesho this month?"
-  - Gemini answers by calling the app's own functions: overview, product metrics, returns, P&L, payments due, TCS/TDS, stock and data health.
+  - Gemini answers by calling the app's own functions: overview, product metrics, returns, P&L, payments due, TCS/TDS, stock, data health, alerts and returns by area.
   - Every number comes from the app's calculations. The AI only explains and suggests.
 - **Digest and return themes:** a period summary, and return reasons grouped into themes per product.
-- **Privacy:** only totals and product names are sent, never buyer details.
+- **Privacy:** only totals, product names, area totals (state, city, zone) and alert counts are sent; never a buyer's name, address or PIN code.
 - **Without a key** the app works fully; the AI panels just say a key is missing.
 - **Models:** a model fallback chain (Flash-Lite first) with retry on rate limits, the same client as the listers. Pin a model with `GEMINI_MODEL`.
 
@@ -253,11 +300,13 @@ GEMINI_API_KEY=your_key
 
 | Page | What it answers |
 |---|---|
-| **Overview** | Sales, profit, returns and payments on the way, per platform and combined |
+| **Overview** | Needs attention, sales, profit, returns, payments on the way, areas with the most returns |
+| **Alerts** | Odd figures in the files, with what to do; Mark OK or Follow up |
 | **Products** | Every product → pack size → code, with a platform-compare toggle |
 | **Product detail** | Variants × platforms, the P&L waterfall, return reasons, stock |
-| **Orders** | Every order line with its source, payout and status |
-| **Returns** | Reasons, RTO vs customer returns, return cost, returns still open |
+| **Orders** | Every order line with its buyer, source, payout and status |
+| **Customers** | Every buyer: orders, returns, RTO, cancellations, profit, flags; a page per buyer |
+| **Returns** | Reasons, RTO vs customer returns, return cost, returns still open, returns by area |
 | **P&L** | A waterfall that always adds up, from sales to profit |
 | **Stock** | On-hand per shelf, packs you can make, days of cover, value |
 | **TCS & TDS** | Held-back tax by month and by payment |
@@ -282,7 +331,7 @@ Seller-Analytics/
 │   │   │   ├── 📁 flipkart/          invoices (PDF) · settlement · returns · cancellations
 │   │   │   ├── 📁 meesho/            invoices (PDF) · payments · returns
 │   │   │   └── table.js · pdf.js · keys.js · entities.js · stage.js · commit.js
-│   │   ├── 📁 metrics/               lines.js (the one order-line query) · economics · reports · health
+│   │   ├── 📁 metrics/               lines.js (the one order-line query) · economics · reports · health · anomalies · customers
 │   │   ├── 📁 inventory/             Stock ledger and pack recipes
 │   │   ├── 📁 ai/                    Gemini client · tools · insights
 │   │   └── 📁 routes/api.js
@@ -309,14 +358,14 @@ Seller-Analytics/
 | **Parsing** | SheetJS · `pdfjs-dist` · `fflate` · `zod` | Excel/CSV read as text; PDF labels rebuilt line by line; zips unpacked in memory |
 | **AI** | `@google/generative-ai` · Gemini Flash-Lite chain | Function calling over the app's own metrics; free tier is enough |
 | **Automation** | Claude scheduled task + Claude in Chrome · `src/fetch/nightly.js` | Uses the seller's signed-in browser; all catch-up and import logic stays in code |
-| **Tests** | Vitest | 77 tests; golden tests on real exports when `samples/` has them |
+| **Tests** | Vitest | 89 tests; golden tests on real exports when `samples/` has them |
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-npm test          # 77 tests
+npm test          # 89 tests
 npm run build     # production client into dist/
 ```
 

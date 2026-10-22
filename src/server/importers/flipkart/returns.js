@@ -35,6 +35,7 @@ const spec = {
     shopsy: ['Shopsy Order', 'Is Shopsy Order', 'Sales Channel', 'Channel'],
     invoiceNo: ['Invoice Number'],
     invoiceDate: ['Invoice Date'],
+    trackingId: ['Tracking ID'],
   },
 };
 
@@ -84,6 +85,8 @@ export default excelImporter({
         price_paise: soft(paise, get('price')),
         invoice_no: soft(id, get('invoiceNo')),
         invoice_date: soft(date, get('invoiceDate')),
+        // On an RTO this is the label's AWB; a customer return gets a pickup number of its own.
+        tracking_id: soft(id, get('trackingId')),
       },
     };
   },

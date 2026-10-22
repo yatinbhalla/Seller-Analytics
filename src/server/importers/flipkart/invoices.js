@@ -1,4 +1,5 @@
 import { CellError, paise } from '../../lib/parse.js';
+import { buyerKey, paymentMode } from '../../lib/buyer.js';
 import { parseSku } from '../../catalog/sku.js';
 import { orderItemKey } from '../keys.js';
 import { dateFrom, findSkus, firstMatch, itemFromLine, shipTo, validateInvoice } from '../invoiceText.js';
@@ -94,6 +95,7 @@ function parsePage(lines, ref) {
 
   const platform = /shopsy/i.test(text) ? 'shopsy' : 'flipkart';
   const ship = shipTo(lines, /shipping(\s*\/\s*customer)?\s*address|ship\s*to|deliver\s*to/i, /sold\s*by|seller|billing\s*address|gstin/i);
+  const buyer = buyerFrom(lines);
   return skus.map((s, i) => {
     const parsed = parseSku(s.sku);
     const it = items[i];
@@ -122,7 +124,51 @@ function parsePage(lines, ref) {
         ship_state: ship.state,
         ship_pincode: ship.pincode,
         cancelled: 0,
+        buyer_name: buyer.name,
+        buyer_key: buyerKey(buyer.name, ship.pincode),
+        ship_address: buyer.address,
+        ship_city: buyer.city,
+        payment_mode: buyer.paymentMode,
+        awb: buyer.awb,
       },
     };
   });
+}
+
+/**
+ * The buyer block of a Flipkart label:
+ *   Shipping/Customer address:
+ *   Name: <name>,
+ *   <street lines>
+ *   HBD: 21 - 10 <City> - <PIN> , IN-UP
+ * "PREPAID" or "COD" follows the order ID at the top, and "AWB No. …" is the
+ * courier's tracking number, which the returns report repeats on an RTO.
+ */
+function buyerFrom(lines) {
+  const text = lines.join('\n');
+  const out = {
+    name: null,
+    address: null,
+    city: null,
+    awb: firstMatch(text, /AWB\s*No\.?\s*:?\s*([A-Z0-9]{8,24})\b/i),
+    paymentMode: paymentMode(firstMatch(text, /\bOD\d{12,22}\s+(PREPAID|COD)\b/i)),
+  };
+  const start = lines.findIndex((l) => /shipping(\s*\/\s*customer)?\s*address/i.test(l));
+  if (start === -1) return out;
+  const street = [];
+  for (let i = start; i < Math.min(lines.length, start + 10); i++) {
+    const line = i === start ? lines[i].replace(/^.*address\s*:?/i, '').trim() : lines[i].trim();
+    if (!line) continue;
+    if (/^(sold\s*by|cpd\b|gstin|billing)/i.test(line)) break;
+    const hbd = line.match(/^HBD\s*:?\s*\d{1,2}\s*-\s*\d{1,2}\s+(.+?)\s*-\s*\d{6}/i);
+    if (hbd) {
+      out.city = hbd[1].replace(/,\s*$/, '').trim() || null;
+      break;
+    }
+    const name = line.match(/^Name\s*:\s*(.+?)\s*,?\s*$/i);
+    if (name && !out.name) out.name = name[1];
+    else street.push(line.replace(/,\s*$/, ''));
+  }
+  out.address = street.join(', ') || null;
+  return out;
 }

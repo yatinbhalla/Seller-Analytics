@@ -31,6 +31,12 @@ export const DEFAULT_SETTINGS = {
   payment_days_min: '7',
   payment_days_max: '15',
   estimate_window_days: '60',
+  // Alerts (metrics/anomalies.js): how far from this seller's usual counts as odd.
+  alert_payout_gap_pct: '15', // payout this many points of the sale below the usual share
+  alert_fee_jump_pct: '50', // shipping or commission this much above the usual
+  alert_price_gap_pct: '25', // selling price this far from the lister's price
+  alert_bulk_qty: '3', // units on one order line
+  alert_return_wait_days: '7', // days a return charge may wait for its returns-file row
 };
 
 let _db = null;
@@ -68,10 +74,19 @@ export function openDb(file = path.join(DATA_DIR, 'analytics.db')) {
 const ADDED_COLUMNS = {
   settlement_lines: {
     order_date: 'TEXT', dispatch_date: 'TEXT', qty: 'INTEGER', gst_pct: 'REAL', invoice_no: 'TEXT', invoice_date: 'TEXT',
-    tcs_paise: 'INTEGER', tds_paise: 'INTEGER',
+    tcs_paise: 'INTEGER', tds_paise: 'INTEGER', shipping_zone: 'TEXT',
   },
-  returns: { dispatch_date: 'TEXT', price_paise: 'INTEGER', invoice_no: 'TEXT', invoice_date: 'TEXT' },
+  returns: { dispatch_date: 'TEXT', price_paise: 'INTEGER', invoice_no: 'TEXT', invoice_date: 'TEXT', tracking_id: 'TEXT' },
+  // Buyer details from labels: kept in this local database only, never sent to Gemini.
+  orders: { buyer_name: 'TEXT', buyer_key: 'TEXT', ship_address: 'TEXT', ship_city: 'TEXT', payment_mode: 'TEXT', awb: 'TEXT' },
 };
+
+// Indexes on added columns, created once the columns exist.
+const ADDED_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS orders_buyer ON orders(buyer_key)',
+  'CREATE INDEX IF NOT EXISTS orders_invoice ON orders(invoice_no)',
+  'CREATE INDEX IF NOT EXISTS orders_awb ON orders(awb)',
+];
 
 function migrate(db) {
   for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
@@ -80,6 +95,7 @@ function migrate(db) {
       if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
     }
   }
+  for (const sql of ADDED_INDEXES) db.exec(sql);
 }
 
 export function getDb() {

@@ -9,6 +9,8 @@ export const ENTITIES = {
       'platform', 'account', 'order_item_key', 'order_id', 'shipment_key', 'invoice_no', 'invoice_date', 'order_date',
       'sku', 'code', 'qty', 'gross_paise', 'discount_paise', 'taxable_paise', 'tax_paise', 'total_paise',
       'ship_state', 'ship_pincode', 'cancelled',
+      // From the label (or the cancellations file); local database only.
+      'buyer_name', 'buyer_key', 'ship_address', 'ship_city', 'payment_mode', 'awb',
     ],
   },
   return: {
@@ -16,7 +18,7 @@ export const ENTITIES = {
     columns: [
       'platform', 'account', 'return_key', 'order_item_key', 'order_id', 'sku', 'code', 'qty', 'return_type', 'reason',
       'sub_reason', 'comments', 'created_date', 'closed_date', 'status', 'outcome', 'condition', 'condition_set_by',
-      'raw_status', 'dispatch_date', 'price_paise', 'invoice_no', 'invoice_date',
+      'raw_status', 'dispatch_date', 'price_paise', 'invoice_no', 'invoice_date', 'tracking_id',
     ],
   },
   settlement: {
@@ -25,7 +27,7 @@ export const ENTITIES = {
       'platform', 'account', 'order_item_key', 'order_id', 'sku', 'code', 'txn_type', 'payment_date', 'settlement_ref',
       'sale_paise', 'refund_paise', 'commission_paise', 'fixed_fee_paise', 'shipping_paise', 'reverse_ship_paise',
       'collection_paise', 'tax_withheld_paise', 'tcs_paise', 'tds_paise', 'penalty_paise', 'claim_paise', 'ads_paise', 'other_paise', 'net_paise',
-      'order_date', 'dispatch_date', 'qty', 'gst_pct', 'invoice_no', 'invoice_date', 'breakdown_json',
+      'order_date', 'dispatch_date', 'qty', 'gst_pct', 'invoice_no', 'invoice_date', 'breakdown_json', 'shipping_zone',
     ],
   },
 };

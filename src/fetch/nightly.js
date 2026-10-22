@@ -24,6 +24,7 @@ const { syncCatalog } = await import('../server/catalog/sync.js');
 const { stageFiles } = await import('../server/importers/stage.js');
 const { commitImports } = await import('../server/importers/commit.js');
 const { localToday } = await import('../server/lib/today.js');
+const { findAnomalies } = await import('../server/metrics/anomalies.js');
 
 const STATE_FILE = path.join(DATA_DIR, 'fetch-state.json');
 const RUN_FILE = path.join(DATA_DIR, 'fetch', 'run.json');
@@ -172,10 +173,12 @@ async function importDownloads(paths) {
   const kept = files.map((f) => moveInto(f, keepDir, !paths.length));
 
   const db = openChecked();
+  const alertsBefore = new Set(highAlerts(db).map((a) => a.key));
   const results = await stageFiles(db, kept.map((f) => ({ fileName: path.basename(f), buffer: fs.readFileSync(f) })));
 
   const clean = results.filter((r) => r.status === 'staged' && !r.summary.rejected && !r.summary.money_changed);
   const committed = clean.length ? await commitImports(db, clean.map((r) => r.importId)) : [];
+  const fresh = highAlerts(db).filter((a) => !alertsBefore.has(a.key));
 
   const newCodes = {};
   for (const r of results) for (const [code, n] of Object.entries(r.summary?.unknownCodes || {})) newCodes[code] = (newCodes[code] || 0) + n;
@@ -199,7 +202,18 @@ async function importDownloads(paths) {
     waitingForReview: review.map((r) => r.fileName),
     failed: failed.map((r) => ({ file: r.fileName, error: r.error })),
     newSkuCodes: newCodes,
+    // High-severity alerts that tonight's files raised (Alerts page), for the WhatsApp message.
+    newAlerts: {
+      count: fresh.length,
+      byType: fresh.reduce((m, a) => ({ ...m, [a.label]: (m[a.label] || 0) + 1 }), {}),
+      top: fresh.slice(0, 3).map((a) => `${a.label}: ${a.title}`),
+    },
   };
+}
+
+/** High-severity alerts not marked OK. Keys are stable, so before/after shows what is new. */
+function highAlerts(db) {
+  return findAnomalies(db, {}).items.filter((a) => a.severity === 'high');
 }
 
 function findDownloads(run) {

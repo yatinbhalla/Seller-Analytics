@@ -2,6 +2,7 @@ import { localToday } from '../lib/today.js';
 import { analyse, reasonLabel } from './aggregate.js';
 import { economicsContext, filterLines, loadLines, loadUnlinkedCosts } from './lines.js';
 import { getSetting } from '../db/db.js';
+import { buyerSummaries } from './customers.js';
 
 export const PLATFORMS = ['flipkart', 'shopsy', 'meesho'];
 
@@ -187,16 +188,24 @@ export function orderList(db, f, { q = '', status = '', limit = 200, offset = 0 
   const { all, lines, ctx } = base(db, f);
   const needle = q.trim().toLowerCase();
   const { perLine } = analyse(all, lines, ctx, null);
+  const buyers = buyerSummaries(db, {});
   const rows = perLine
     .filter(({ line, e }) => {
-      if (needle && !`${line.order_id} ${line.order_item_key} ${line.sku} ${line.product_name || ''}`.toLowerCase().includes(needle)) return false;
+      const text = `${line.order_id} ${line.order_item_key} ${line.sku} ${line.product_name || ''} ${line.buyer_name || ''} ${line.ship_city || ''} ${line.ship_pincode || ''}`;
+      if (needle && !text.toLowerCase().includes(needle)) return false;
       if (status === 'returned' && !e.returned) return false;
       if (status === 'rto' && e.returnType !== 'rto') return false;
       if (status === 'unsettled' && e.settled) return false;
       if (status === 'cost_missing' && !e.costMissing) return false;
+      if (status === 'repeat_buyer' && !buyers.get(line.buyer_key)?.flags.repeat) return false;
+      if (status === 'frequent_returner' && !buyers.get(line.buyer_key)?.flags.frequentReturner) return false;
       return true;
     })
     .reverse();
+  const buyerOf = (key) => {
+    const b = key && buyers.get(key);
+    return b ? { key, orders: b.orders, returned: b.returned, rto: b.rto, cancelled: b.cancelled, flags: b.flags } : null;
+  };
   return {
     count: rows.length,
     rows: rows.slice(offset, offset + limit).map(({ line, e }) => ({
@@ -205,6 +214,8 @@ export function orderList(db, f, { q = '', status = '', limit = 200, offset = 0 
       totalPaise: line.total_paise, payoutPaise: e.payout, estimated: e.estimated, profitPaise: e.profit, costMissing: e.costMissing,
       packagingPaise: e.packaging, returned: e.returned, returnType: e.returnType, returnStatus: line.return_status,
       returnReason: line.return_reason, restocked: e.restocked,
+      buyerName: line.buyer_name, city: line.ship_city, state: line.ship_state, pincode: line.ship_pincode,
+      paymentMode: line.payment_mode, linkedVia: line.linked_via, buyer: buyerOf(line.buyer_key),
       source: line.import_id ? `import #${line.import_id}, ${line.source_ref}` : `from the ${line.line_source} file — no invoice uploaded`,
     })),
   };

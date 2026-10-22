@@ -76,6 +76,8 @@ export default excelImporter({
         price_paise: null,
         invoice_no: null,
         invoice_date: null,
+        // On an RTO this is the label's AWB; a customer return gets a pickup number of its own.
+        tracking_id: soft(id, get('awb')),
       },
     };
   },

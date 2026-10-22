@@ -22,7 +22,8 @@ const FAM = (t) => `CASE WHEN ${t}.platform = 'meesho' THEN 'meesho' ELSE 'flipk
 
 const LINES_SQL = `
 WITH st AS (
-  SELECT ${FAM('s')} AS fam, s.order_item_key,
+  SELECT ${FAM('s')} AS fam, COALESCE(lk.to_key, s.order_item_key) AS order_item_key, MAX(lk.via) AS linked_via,
+         MAX(s.shipping_zone) AS shipping_zone,
          COUNT(*) AS n_lines,
          MAX(CASE WHEN s.txn_type IN ('return', 'rto') THEN 1 ELSE 0 END) AS has_return_txn,
          MAX(CASE WHEN s.txn_type = 'rto' THEN 1 ELSE 0 END) AS has_rto_txn,
@@ -38,14 +39,18 @@ WITH st AS (
          MIN(s.order_date) AS order_date, MIN(s.dispatch_date) AS dispatch_date, MAX(s.qty) AS qty,
          MAX(s.gst_pct) AS gst_pct, MAX(s.invoice_no) AS invoice_no, MIN(s.invoice_date) AS invoice_date
     FROM settlement_lines s
+    LEFT JOIN v_order_links lk ON lk.fam = ${FAM('s')} AND lk.from_key = s.order_item_key
    WHERE s.order_item_key IS NOT NULL
-   GROUP BY fam, s.order_item_key
+   GROUP BY fam, COALESCE(lk.to_key, s.order_item_key)
 ),
+-- A payment or return that matched its label by invoice number, AWB or order ID
+-- (v_order_links) joins that label's line: one sale stays one line.
 r1 AS (
-  SELECT r.*, ${FAM('r')} AS fam,
-         ROW_NUMBER() OVER (PARTITION BY ${FAM('r')}, r.order_item_key
+  SELECT r.*, ${FAM('r')} AS fam, COALESCE(lk.to_key, r.order_item_key) AS link_key, lk.via AS linked_via,
+         ROW_NUMBER() OVER (PARTITION BY ${FAM('r')}, COALESCE(lk.to_key, r.order_item_key)
                             ORDER BY COALESCE(r.created_date, r.closed_date) DESC, r.id DESC) AS rn
     FROM returns r
+    LEFT JOIN v_order_links lk ON lk.fam = ${FAM('r')} AND lk.from_key = r.order_item_key
    WHERE r.order_item_key IS NOT NULL
 ),
 ship AS (
@@ -55,7 +60,7 @@ ship AS (
 k AS (
   SELECT ${FAM('o')} AS fam, o.order_item_key FROM orders o WHERE o.cancelled = 0
   UNION SELECT fam, order_item_key FROM st
-  UNION SELECT fam, order_item_key FROM r1 WHERE rn = 1
+  UNION SELECT fam, link_key FROM r1 WHERE rn = 1
 ),
 base AS (
   SELECT o.id,
@@ -80,6 +85,12 @@ base AS (
          CASE WHEN o.id IS NULL AND st.n_lines IS NOT NULL AND COALESCE(st.sale_gross, 0) = 0 THEN 1 ELSE 0 END AS adjustment_only,
          st.gst_pct,
          o.ship_state, o.ship_pincode, o.import_id, o.source_ref,
+         -- Buyer details from the label (local only), and the IDs each file gave, so
+         -- alerts can spot files that disagree.
+         o.buyer_key, o.buyer_name, o.ship_address, o.ship_city, o.payment_mode, o.awb, st.shipping_zone,
+         o.invoice_no AS label_invoice_no, st.invoice_no AS settled_invoice_no, st.sale_gross AS settled_sale_gross,
+         r1.invoice_no AS return_invoice_no, r1.tracking_id AS return_tracking_id,
+         COALESCE(st.linked_via, r1.linked_via) AS linked_via,
          CASE WHEN o.id IS NULL OR ship.first_id = o.id THEN 1 ELSE 0 END AS first_in_shipment,
          st.n_lines AS settlement_lines, st.has_return_txn, st.net AS settled_net, st.sale AS settled_sale,
          st.refund, st.commission, st.fixed_fee, st.shipping, st.reverse_ship, st.collection,
@@ -95,7 +106,7 @@ base AS (
     FROM k
     LEFT JOIN orders o ON ${FAM('o')} = k.fam AND o.order_item_key = k.order_item_key AND o.cancelled = 0
     LEFT JOIN st ON st.fam = k.fam AND st.order_item_key = k.order_item_key
-    LEFT JOIN r1 ON r1.rn = 1 AND r1.fam = k.fam AND r1.order_item_key = k.order_item_key
+    LEFT JOIN r1 ON r1.rn = 1 AND r1.fam = k.fam AND r1.link_key = k.order_item_key
     LEFT JOIN ship ON ship.fam = k.fam AND ship.shipment_key = o.shipment_key
 )
 SELECT b.*,

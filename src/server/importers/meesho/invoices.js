@@ -1,4 +1,5 @@
 import { CellError, paise } from '../../lib/parse.js';
+import { buyerKey, paymentMode } from '../../lib/buyer.js';
 import { parseSku } from '../../catalog/sku.js';
 import { orderItemKey } from '../keys.js';
 import { dateFrom, findSkus, firstMatch, itemFromLine, shipTo, validateInvoice } from '../invoiceText.js';
@@ -116,6 +117,7 @@ function parsePage(lines, ref) {
   });
 
   const ship = shipTo(lines, /customer\s*address|ship\s*to|bill\s*to/i, /if\s*undelivered|return\s*to|sold\s*by|gstin/i);
+  const buyer = buyerFrom(lines);
   return skus.map((s, i) => {
     const parsed = parseSku(s.sku);
     const it = items[i];
@@ -144,7 +146,56 @@ function parsePage(lines, ref) {
         ship_state: ship.state,
         ship_pincode: ship.pincode,
         cancelled: 0,
+        buyer_name: buyer.name,
+        buyer_key: buyerKey(buyer.name, ship.pincode),
+        ship_address: buyer.address,
+        ship_city: buyer.city,
+        payment_mode: buyer.paymentMode,
+        awb: buyer.awb,
       },
     };
   });
+}
+
+const COURIERS = /^(valmo|delhivery|shadowfax|xpress\s*bees|ecom\s*express|e-?kart|dtdc|blue\s*dart|india\s*post|pocketship|smartr|loadshare|amazon\s*shipping)$/i;
+
+/**
+ * The buyer block of a Meesho label, as found on real labels on 2026-10-22:
+ *   Customer Address Prepaid: Do not collect cash
+ *   <name>
+ *   <street lines, with the courier's lines mixed in: "Pickup 26/10", "Valmo",
+ *    and routing codes like "JXO-R0" at a line's end>
+ *   <…, City or District>, <State>, <PIN>
+ *   If undelivered, return to: …
+ * The courier's tracking number (AWB) has a line of its own just above
+ * "Product Details"; the returns report repeats it on an RTO.
+ */
+function buyerFrom(lines) {
+  const pd = lines.findIndex((l) => /^product\s*details/i.test(l));
+  // Valmo "VL" + 13 digits, Shadowfax "SF" + 10 digits + "FPL", others all digits.
+  const awbLine = pd > 0 ? lines.slice(Math.max(0, pd - 3), pd).reverse().find((l) => /^[A-Z]{0,4}\d{9,18}[A-Z]{0,4}$/.test(l.trim())) : null;
+  const start = lines.findIndex((l) => /customer\s*address/i.test(l));
+  const out = { name: null, address: null, city: null, awb: awbLine ? awbLine.trim() : null, paymentMode: start === -1 ? null : paymentMode(lines[start]) };
+  if (start === -1) return out;
+  const street = [];
+  for (let i = start + 1; i < Math.min(lines.length, start + 10); i++) {
+    const line = lines[i].replace(/\s+[A-Z]{2,4}-R\d+\s*$/, '').trim();
+    if (/^(if\s*undelivered|return\s*to)/i.test(line)) break;
+    if (!line || /^pickup\s+\d/i.test(line) || COURIERS.test(line)) continue;
+    if (!out.name) {
+      out.name = line.replace(/,\s*$/, '');
+      continue;
+    }
+    const parts = line.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2 && /^\d{6}\b/.test(parts[parts.length - 1])) {
+      // "<…>, <City>, <State>, <PIN>": anything before the city is still street.
+      const city = parts.length >= 3 ? parts[parts.length - 3] : null;
+      out.city = city ? city.replace(/\s+district$/i, '') : null;
+      street.push(...parts.slice(0, -3));
+      break;
+    }
+    street.push(line.replace(/,\s*$/, ''));
+  }
+  out.address = street.join(', ') || null;
+  return out;
 }

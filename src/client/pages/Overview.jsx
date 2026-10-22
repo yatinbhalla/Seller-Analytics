@@ -5,6 +5,7 @@ import { useFilters } from '../lib/filters.jsx';
 import { n, niceDate, pct, platformLabel, rs } from '../lib/format.js';
 import { Card, Empty, ErrorBox, Loading, Notice, PageHeader, PlatformTag, Stat } from '../components/ui.jsx';
 import { RankBars, TrendChart } from '../components/Charts.jsx';
+import { NeedsAttention, ReturnAreas } from '../components/NeedsAttention.jsx';
 
 export default function Overview() {
   const { filters } = useFilters();
@@ -28,6 +29,7 @@ export default function Overview() {
     <Loading loading={loading}>
       <PageHeader title="Overview" subtitle={`${n(t.lines)} order lines · ${n(t.units)} units`} />
       <ErrorBox error={error} />
+      <NeedsAttention />
       {(t.costMissingLines > 0 || t.estimatedLines > 0 || t.noInvoiceLines > 0 || t.returnsBeforeHistory > 0) && (
         <Notice>
           {t.estimatedLines > 0 && <>{n(t.estimatedLines)} lines are not settled yet, so their payout is <b>estimated</b> from similar settled orders. </>}
@@ -130,6 +132,9 @@ export default function Overview() {
         <Card title="Top return reasons">
           {data.topReasons.length ? <RankBars rows={data.topReasons} label={(r) => r.reason} value={(r) => r.count} format={n} /> : <Empty>No returns.</Empty>}
         </Card>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <ReturnAreas />
       </div>
       {filters.platforms.length > 0 && (
         <p className="mt-3 text-xs text-muted">Showing {filters.platforms.map(platformLabel).join(', ')} only.</p>

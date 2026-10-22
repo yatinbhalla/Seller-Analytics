@@ -3,6 +3,8 @@ import { getSetting } from '../db/db.js';
 import { overview, paymentsDue, pnl, productDetail, products, returnsReport, taxCredits } from '../metrics/reports.js';
 import { stockReport } from '../inventory/ledger.js';
 import { dataHealth } from '../metrics/health.js';
+import { findAnomalies } from '../metrics/anomalies.js';
+import { areaReport } from '../metrics/customers.js';
 
 /**
  * The functions Gemini may call to answer "Ask your data".
@@ -130,6 +132,44 @@ export function buildTools(db) {
           suggestedReorder: s.suggestedReorder, inTransitReturns: s.inTransit, packsPossible: s.packs,
         })),
     },
+    get_alerts: {
+      description: 'Odd figures found in the marketplace files: counts and money per alert type (low payouts, penalties and recoveries, unrecorded returns, files that disagree, unusual fees, loss-making sales, …), plus overdue payments and stale returns.',
+      parameters: { type: 'object', properties: filterParams },
+      run: (a) => {
+        const r = findAnomalies(db, f(a));
+        return {
+          counts: r.counts, markedOk: r.reviewedOk,
+          byType: r.byType.map((t) => ({ alert: t.label, severity: t.severity, count: t.count, amountRs: rupees(t.amountPaise) })),
+          overduePayments: { orders: r.gaps.overduePayments.lines, rs: rupees(r.gaps.overduePayments.paise) },
+          returnsOpenTooLong: r.gaps.staleReturns.count,
+        };
+      },
+    },
+    get_areas: {
+      description: 'Returns by area: orders, return and RTO rates and return cost per state, per city ("City, State"), or per Flipkart shipping zone, flagging areas above the average; plus COD vs prepaid. Totals only — no buyers.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ...filterParams,
+          level: { type: 'string', enum: ['state', 'city', 'zone'], description: 'Group by state (default), city or Flipkart shipping zone.' },
+          state: { type: 'string', description: 'Only this state (e.g. to list its cities).' },
+        },
+      },
+      run: (a) => {
+        // Never PIN codes: with a name-free area this small, a buyer could be singled out.
+        const level = ['state', 'city', 'zone'].includes(a.level) ? a.level : 'state';
+        const r = areaReport(db, f(a), { level, state: a.state || '' });
+        const row = (x) => ({
+          orders: x.orders, customerReturns: x.returnsCustomer, rtos: x.returnsRto, returnRatePct: pct(x.returnRate),
+          rtoRatePct: pct(x.rtoRate), returnCostRs: rupees(x.returnCost), topReason: x.topReason?.reason ?? null,
+        });
+        return {
+          total: row(r.total), minOrdersForAboveAverage: r.minOrders, ordersWithoutArea: r.unknownLines,
+          areas: r.rows.slice(0, 30).map((x) => ({ area: x.key, aboveAverage: x.aboveAverage, ...row(x) })),
+          byPaymentMode: r.byPaymentMode.map((m) => ({ mode: m.key, ...row(m) })),
+        };
+      },
+    },
     get_data_health: {
       description: 'Data problems that make numbers incomplete: missing upload days, unpaid orders, stale returns, codes without cost.',
       parameters: { type: 'object', properties: {} },
@@ -162,4 +202,5 @@ Rules:
 - Be concrete and brief: lead with the answer, then 2–4 bullet points of evidence, then a
   suggested action (scale / fix / stop / restock / reprice) where it fits.
 - Compare platforms when it helps: a product can win on Meesho and lose on Flipkart.
+- You never see buyers. Area tools give state, city and zone totals only; never ask for names.
 - Today's date is ${localToday()}.`;

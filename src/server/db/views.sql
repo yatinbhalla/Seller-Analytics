@@ -5,6 +5,50 @@ DROP VIEW IF EXISTS v_code_resolved;
 DROP VIEW IF EXISTS v_catalog;
 DROP VIEW IF EXISTS v_stock_ledger;
 DROP VIEW IF EXISTS v_stock_on_hand;
+DROP VIEW IF EXISTS v_order_links;
+
+-- A payment or return line whose order-item key matches no label → the label it
+-- belongs to, by the other IDs the files share: the invoice number, the courier's
+-- tracking number (an RTO comes back on the label's AWB), or, on Flipkart, the order
+-- ID when that order has a single line. Tried in that order; a step that would point
+-- at two order lines is skipped, never guessed between.
+CREATE VIEW v_order_links AS
+WITH ord AS (
+  SELECT CASE WHEN platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END AS fam,
+         order_item_key, order_id, invoice_no, awb
+    FROM orders
+),
+loose AS (
+  SELECT fam, from_key, MAX(invoice_no) AS invoice_no, MAX(tracking_id) AS tracking_id, MAX(order_id) AS order_id
+    FROM (
+      SELECT CASE WHEN s.platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END AS fam, s.order_item_key AS from_key,
+             s.invoice_no, NULL AS tracking_id, s.order_id
+        FROM settlement_lines s WHERE s.order_item_key IS NOT NULL
+      UNION ALL
+      SELECT CASE WHEN r.platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END, r.order_item_key,
+             r.invoice_no, r.tracking_id, r.order_id
+        FROM returns r WHERE r.order_item_key IS NOT NULL
+    ) x
+   WHERE NOT EXISTS (SELECT 1 FROM ord o WHERE o.fam = x.fam AND o.order_item_key = x.from_key)
+   GROUP BY fam, from_key
+),
+candidates AS (
+  SELECT l.fam, l.from_key, 1 AS step, 'invoice' AS via, o.order_item_key AS to_key
+    FROM loose l JOIN ord o ON o.fam = l.fam AND o.invoice_no = l.invoice_no
+  UNION ALL
+  SELECT l.fam, l.from_key, 2, 'awb', o.order_item_key
+    FROM loose l JOIN ord o ON o.fam = l.fam AND o.awb = l.tracking_id
+  UNION ALL
+  SELECT l.fam, l.from_key, 3, 'order id', o.order_item_key
+    FROM loose l JOIN ord o ON l.fam = 'flipkart' AND o.fam = 'flipkart' AND o.order_id = l.order_id
+),
+single AS (
+  SELECT fam, from_key, step, via, MIN(to_key) AS to_key
+    FROM candidates GROUP BY fam, from_key, step, via HAVING COUNT(DISTINCT to_key) = 1
+)
+SELECT s.fam, s.from_key, s.to_key, s.via
+  FROM single s
+ WHERE s.step = (SELECT MIN(step) FROM single s2 WHERE s2.fam = s.fam AND s2.from_key = s.from_key);
 
 -- Any code as written → the canonical code. Codes resolve to themselves; aliases to
 -- their target. A raw code missing from both is an unknown code.
@@ -51,7 +95,12 @@ CREATE VIEW v_stock_ledger AS
     JOIN orders o ON o.platform IN (
            CASE WHEN rt.platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END,
            CASE WHEN rt.platform = 'meesho' THEN 'meesho' ELSE 'shopsy' END)
-         AND o.order_item_key = rt.order_item_key AND o.cancelled = 0
+         AND o.order_item_key = COALESCE(
+               (SELECT lk.to_key FROM v_order_links lk
+                 WHERE lk.fam = CASE WHEN rt.platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END
+                   AND lk.from_key = rt.order_item_key),
+               rt.order_item_key)
+         AND o.cancelled = 0
     JOIN v_code_resolved rc ON rc.raw = COALESCE(rt.code, o.code)
     JOIN pack_recipes r ON r.code = rc.code
    WHERE rt.status = 'closed'

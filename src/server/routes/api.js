@@ -9,6 +9,8 @@ import { stageFiles, discardImport, setAccepted } from '../importers/stage.js';
 import { commitImports, revertImport } from '../importers/commit.js';
 import { overview, products, productDetail, orderList, returnsReport, pnl, paymentsDue, taxCredits } from '../metrics/reports.js';
 import { dataHealth } from '../metrics/health.js';
+import { findAnomalies, setAnomalyReview } from '../metrics/anomalies.js';
+import { areaReport, customerDetail, customerList } from '../metrics/customers.js';
 import { stockReport, addMove, stockHistory, deleteManualMove, setRecipe } from '../inventory/ledger.js';
 import { aiConfigured } from '../ai/client.js';
 import { ask, digest, returnThemes } from '../ai/insights.js';
@@ -115,6 +117,23 @@ router.get('/reports/pnl', wrap((req) => pnl(getDb(), filters(req.query))));
 router.get('/reports/health', wrap(() => dataHealth(getDb())));
 router.get('/reports/payments-due', wrap((req) => paymentsDue(getDb(), filters(req.query))));
 router.get('/reports/tax-credits', wrap((req) => taxCredits(getDb(), filters(req.query))));
+
+// Alerts, buyers and areas. Buyer names and addresses only ever go to this local client.
+router.get('/reports/alerts', wrap((req) => findAnomalies(getDb(), filters(req.query), { reviewed: req.query.reviewed === '1' })));
+// Alert keys hold "|" and order IDs, so they travel in the body, not the URL.
+router.post('/alerts/review', wrap((req) => {
+  const keys = Array.isArray(req.body.keys) ? req.body.keys : [req.body.key];
+  return keys.map((k) => setAnomalyReview(getDb(), k, req.body.status || '', req.body.note || null));
+}));
+router.get('/reports/customers', wrap((req) =>
+  customerList(getDb(), filters(req.query), { q: String(req.query.q || ''), flag: String(req.query.flag || '') })));
+router.get('/reports/customers/:key', wrap((req) => {
+  const d = customerDetail(getDb(), req.params.key);
+  if (!d) throw Object.assign(new Error('No such buyer.'), { status: 404 });
+  return d;
+}));
+router.get('/reports/areas', wrap((req) =>
+  areaReport(getDb(), filters(req.query), { level: String(req.query.level || 'state'), state: String(req.query.state || ''), city: String(req.query.city || '') })));
 
 /** The seller marks a returned item's condition after opening the parcel. */
 router.patch('/returns/condition', wrap((req) => {
