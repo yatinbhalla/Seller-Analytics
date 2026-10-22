@@ -1,0 +1,78 @@
+import { useState } from 'react';
+import { qs, useApi } from '../lib/api.js';
+import { useFilters } from '../lib/filters.jsx';
+import { n, niceDate, rs } from '../lib/format.js';
+import { Empty, ErrorBox, Input, Loading, PageHeader, PlatformTag, Select, Status, Button } from '../components/ui.jsx';
+
+const PAGE = 200;
+
+export default function Orders() {
+  const { filters } = useFilters();
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [offset, setOffset] = useState(0);
+  const { data, error, loading } = useApi(`/reports/orders${qs(filters, { q, status, offset, limit: PAGE })}`);
+
+  return (
+    <Loading loading={loading}>
+      <PageHeader title="Orders" subtitle={data ? `${n(data.count)} order lines` : ''}>
+        <div className="flex flex-wrap gap-2">
+          <Input placeholder="Order ID, sub-order, SKU or product" value={q} onChange={(e) => { setQ(e.target.value); setOffset(0); }} className="w-72" />
+          <Select value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); }} aria-label="Show">
+            <option value="">All lines</option>
+            <option value="returned">Returned (any)</option>
+            <option value="rto">RTO only</option>
+            <option value="unsettled">Not settled yet</option>
+            <option value="cost_missing">Cost missing</option>
+          </Select>
+        </div>
+      </PageHeader>
+      <ErrorBox error={error} />
+      {!data ? null : !data.rows.length ? (
+        <Empty>No order lines match.</Empty>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Date</th><th>Platform</th><th>Order</th><th>SKU</th><th>Product</th><th className="r">Qty</th>
+                <th className="r">Invoice</th><th className="r">Payout</th><th className="r">Profit</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((o) => (
+                <tr key={o.key} title={`Source: ${o.source}`}>
+                  <td className="whitespace-nowrap">{niceDate(o.saleDate)}</td>
+                  <td><PlatformTag platform={o.platform} /></td>
+                  <td className="font-mono text-xs">{o.itemKey.split(':')[0]}</td>
+                  <td className="font-mono text-xs">{o.sku}</td>
+                  <td>{o.product || <span className="text-bad">Unknown code {o.code}</span>}<div className="text-xs text-muted">{o.variant}</div></td>
+                  <td className="r">{o.qty}</td>
+                  <td className="r">{rs(o.totalPaise)}{o.lineSource !== 'invoice' && <div className="text-[11px] text-muted">{o.priceEstimated ? 'list price' : 'no invoice'}</div>}</td>
+                  <td className="r">{rs(o.payoutPaise)}{o.estimated && o.payoutPaise != null && <div className="text-[11px] text-muted">estimated</div>}</td>
+                  <td className={`r ${o.profitPaise < 0 ? 'text-bad' : ''}`}>{o.costMissing ? <span className="text-xs text-muted">no cost</span> : rs(o.profitPaise)}</td>
+                  <td>
+                    {o.returned ? (
+                      <Status kind={o.restocked ? 'info' : 'warn'}>
+                        {o.returnType === 'rto' ? 'RTO' : 'Returned'} · {o.returnStatus === 'closed' ? (o.restocked ? 'restocked' : 'closed') : 'in transit'}
+                      </Status>
+                    ) : (
+                      <span className="text-xs text-ink-2">{o.estimated ? 'awaiting payment' : 'settled'}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {data && data.count > PAGE && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-ink-2">
+          <Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Newer</Button>
+          <span>{offset + 1}–{Math.min(offset + PAGE, data.count)} of {n(data.count)}</span>
+          <Button disabled={offset + PAGE >= data.count} onClick={() => setOffset(offset + PAGE)}>Older</Button>
+        </div>
+      )}
+    </Loading>
+  );
+}

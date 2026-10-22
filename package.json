@@ -1,0 +1,41 @@
+{
+  "name": "seller-analytics",
+  "version": "0.1.0",
+  "description": "Local analytics for Flipkart, Shopsy and Meesho: orders, returns, P&L and stock",
+  "type": "module",
+  "scripts": {
+    "start": "concurrently \"node src/server/index.js\" \"vite\" --names \"server,client\" --prefix-colors \"cyan,magenta\"",
+    "server": "node src/server/index.js",
+    "client": "vite",
+    "build": "vite build",
+    "fetch": "node src/fetch/nightly.js",
+    "test": "vitest run"
+  },
+  "author": "Yatin Bhalla",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "private": true,
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "express": "^4.22.3",
+    "fflate": "^0.8.3",
+    "multer": "^2.4.0",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router": "^7.18.4",
+    "recharts": "^3.10.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^8.2.2",
+    "tailwindcss": "^4.3.3",
+    "vite": "^7.3.7",
+    "vitest": "^5.0.5"
+  }
+}

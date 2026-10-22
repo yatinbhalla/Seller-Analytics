@@ -1,0 +1,17 @@
+# ─── SECURITY — never commit these ─────────────────────────────────────────────
+.env
+.env.local
+
+# ─── Private business data ─────────────────────────────────────────────────────
+# The database, every uploaded report and the backups hold order IDs, payouts and
+# ship-to pincodes. Sample files are real marketplace exports. All of it stays local.
+data/
+samples/*
+!samples/README.md
+
+# ─── Build output ──────────────────────────────────────────────────────────────
+node_modules/
+dist/
+
+# The seller's real cost prices (see src/server/seed/costs.js)
+src/server/seed/costs.local.js
