@@ -5,7 +5,7 @@ import { DATA_DIR } from '../db/db.js';
 import { resolveCode } from '../catalog/sku.js';
 import { detectFile } from './registry.js';
 import { contentHash, MONEY_FIELDS, moneyOf, naturalKey, sha256 } from './keys.js';
-import { getRow, isOrderReport, mergeOrder, mergeReturn, pick } from './entities.js';
+import { getRow, isExchange, isOrderReport, mergeOrder, mergeReturn, pick } from './entities.js';
 
 const ACCOUNT = 'main';
 
@@ -114,10 +114,11 @@ function stageRows(db, importId, parsed, batchRows) {
         const prev = db.prepare('SELECT payload FROM staged_rows WHERE import_id = ? AND entity = ? AND natural_key = ?').get(seen.importId, entity, key);
         const prevPayload = JSON.parse(prev.payload);
         // An invoice and a cancellation of the same line merge, and so do an invoice and
-        // an orders-report line; two different invoices for one line still fall through
-        // to the conflict below.
+        // an orders-report line, and a sale and its door-step exchange; two different
+        // invoices for one line still fall through to the conflict below.
         const orderMerge = entity === 'order'
-          && (!!prevPayload.cancelled !== !!payload.cancelled || isOrderReport(prevPayload) !== isOrderReport(payload));
+          && (!!prevPayload.cancelled !== !!payload.cancelled || isOrderReport(prevPayload) !== isOrderReport(payload)
+            || isExchange(prevPayload, payload));
         if (entity === 'return' || orderMerge) {
           const merged = orderMerge ? mergeOrder(prevPayload, payload) : mergeReturn({ ...prevPayload, status: prevPayload.status }, payload);
           const { action, diff } = compare(db, entity, key, merged);
@@ -184,7 +185,9 @@ export function compare(db, entity, key, payload) {
   // An invoice replacing an orders-report line is the real figure arriving, not a
   // change to confirm.
   const invoiceArrived = entity === 'order' && isOrderReport(existing) && !isOrderReport(payload);
-  const moneyMoved = !invoiceArrived && MONEY_FIELDS[entity].some((f) => f in changed);
+  // Nor is the original sale replacing its door-step exchange, seen first.
+  const saleOverExchange = entity === 'order' && isExchange(existing, payload);
+  const moneyMoved = !invoiceArrived && !saleOverExchange && MONEY_FIELDS[entity].some((f) => f in changed);
   return { action: moneyMoved ? 'money_changed' : 'update', diff: JSON.stringify(changed) };
 }
 

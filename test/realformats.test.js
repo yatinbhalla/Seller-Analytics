@@ -340,6 +340,33 @@ describe('Orders reports (real layouts)', () => {
   const fkRow = (o) => FK_HEAD.map((h) => o[h] ?? '');
   const fkOrders = (rows) => xlsx({ Help: [['How to read this report']], Orders: [FK_HEAD, ...rows.map(fkRow)] });
 
+  it('keeps a sale, not its door-step exchange, when Meesho reuses the sub-order number', async () => {
+    const exchange = (date, status, price, packet) => {
+      const row = msRow(status, '2001_1', 'WH_MFO/1', packet, price);
+      row[3] = date;
+      return row;
+    };
+    const sale = { order_date: '2026-08-10', total_paise: 15600, shipment_key: 'pkt:KP4SALE', cancelled: 0 };
+    const stored = (db) => db.prepare('SELECT order_date, total_paise, shipment_key, cancelled FROM orders').all();
+
+    // Both in one file: merged, nothing set aside.
+    const a = makeDb();
+    const [s] = await importAll(a, [{ buffer: msOrders([exchange('2026-08-10', 'DELIVERED', '156.0', 'KP4SALE'), exchange('2026-08-15', 'DOOR_STEP_EXCHANGED', '165.0', 'KP4SWAP')]), fileName: 'Orders_a.csv' }]);
+    expect(s.summary).toMatchObject({ new: 1, rejected: 0, batchDupes: 1 });
+    expect(stored(a)).toEqual([sale]);
+
+    // The exchange in a later download, or the sale arriving after its exchange: no change to confirm.
+    for (const order of [['DELIVERED', 'DOOR_STEP_EXCHANGED'], ['DOOR_STEP_EXCHANGED', 'DELIVERED']]) {
+      const b = makeDb();
+      for (const st of order) {
+        const row = st === 'DELIVERED' ? exchange('2026-08-10', st, '156.0', 'KP4SALE') : exchange('2026-08-15', st, '165.0', 'KP4SWAP');
+        const [r] = await importAll(b, [{ buffer: msOrders([row]), fileName: `Orders_${st}.csv` }]);
+        expect(r.summary).toMatchObject({ rejected: 0, money_changed: 0 });
+      }
+      expect(stored(b)).toEqual([sale]);
+    }
+  });
+
   it('reads the Meesho orders report: cancelled lines, packets, GST estimated', async () => {
     const db = makeDb();
     const [s] = await importAll(db, [{

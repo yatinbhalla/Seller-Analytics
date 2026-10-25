@@ -32,9 +32,19 @@ const DOWNLOADS = process.env.FETCH_DOWNLOADS_DIR || path.join(os.homedir(), 'Do
 
 /** Steps that remember the last day they covered. Payments are checked against the database instead. */
 const STEPS = [
-  'meesho.delivered', 'meesho.intransit', 'meesho.payments',
-  'flipkart.returnsClosed', 'flipkart.returnsCreated', 'flipkart.cancellations', 'flipkart.payments',
+  'meesho.delivered', 'meesho.intransit', 'meesho.payments', 'meesho.orders',
+  'flipkart.returnsClosed', 'flipkart.returnsCreated', 'flipkart.cancellations', 'flipkart.payments', 'flipkart.orders',
 ];
+
+// Orders reports run two days behind: on the 25th, returns and payments go up to the
+// 24th but orders only to the 23rd, so a day's orders have had time to be packed,
+// shipped or cancelled before they are read.
+const ORDERS_LAG_DAYS = 2;
+// The longest range one orders download allows (Meesho: "not greater than 1 month";
+// Flipkart's Reports Centre took 90 days on 2026-10-25).
+const ORDERS_MAX_DAYS = { meesho: 30, flipkart: 90 };
+// With no orders fetched yet, start this far back (the seller asked for 3 months).
+const ORDERS_FIRST_RUN_DAYS = 90;
 
 /** What each night's downloads are called — anything else in Downloads is left alone. */
 const DOWNLOAD_NAMES = [
@@ -73,9 +83,14 @@ function plan() {
   const yesterday = addDays(today, -1);
   // First run: yesterday for returns, the last 30 days for payments (what both lists show).
   const from = (step, firstRunDays = 1) => (state[step] ? addDays(state[step], 1) : addDays(today, -firstRunDays));
-  const range = (step, firstRunDays) => {
+  const range = (step, firstRunDays, to = yesterday) => {
     const f = from(step, firstRunDays);
-    return f > yesterday ? null : { from: f, to: yesterday, days: daysBetween(f, yesterday) + 1 };
+    return f > to ? null : { from: f, to, days: daysBetween(f, to) + 1 };
+  };
+  const ordersTo = addDays(today, -ORDERS_LAG_DAYS);
+  const ordersRange = (step, platform) => {
+    const r = range(step, ORDERS_FIRST_RUN_DAYS + ORDERS_LAG_DAYS - 1, ordersTo);
+    return r && { ...r, downloads: chunks(r.from, r.to, ORDERS_MAX_DAYS[platform]) };
   };
 
   fs.mkdirSync(path.dirname(RUN_FILE), { recursive: true });
@@ -89,10 +104,12 @@ function plan() {
   const created = range('flipkart.returnsCreated');
   const cancelled = range('flipkart.cancellations');
   const fkPay = range('flipkart.payments', 30);
+  const msOrders = ordersRange('meesho.orders', 'meesho');
+  const fkOrders = ordersRange('flipkart.orders', 'flipkart');
 
   // Every Supplier Panel address carries the account's own short code.
   const slug = process.env.MEESHO_PANEL_SLUG;
-  if ((delivered || intransit || msPay) && !slug) {
+  if ((delivered || intransit || msPay || msOrders) && !slug) {
     throw new Error('Set MEESHO_PANEL_SLUG in .env: the code after /fulfillment/ or /payouts/ in your Supplier Panel addresses.');
   }
   const panel = 'https://supplier.meesho.com/panel/v3/new';
@@ -128,6 +145,8 @@ function plan() {
         listUrl: `${panel}/payouts/${slug}/payments/previous-payments`,
         detailsUrl: `${panel}/payouts/${slug}/payments/payment-details/2/<YYYY-MM-DD>`,
       },
+      // Orders → Download Orders Data → Select Date Range, one export per range.
+      orders: msOrders && { ...msOrders, url: `${panel}/fulfillment/${slug}/orders/pending` },
     },
     flipkart: {
       returnsClosed: closed && { ...closed, dates: eachDay(closed.from, closed.to) },
@@ -139,9 +158,21 @@ function plan() {
         listUrl: 'https://seller.flipkart.com/index.html#dashboard/payments/previous-payments?query=' +
           encodeURIComponent(JSON.stringify({ start_date: fkPay.from, end_date: today, token: '0', page_size: '8' })),
       },
+      // Reports → Request New Report → Fulfilment Reports → Orders → custom range.
+      orders: fkOrders && { ...fkOrders, url: 'https://seller.flipkart.com/index.html#dashboard/metrics/report-centre' },
     },
-    nothingToDo: ![delivered, intransit, msPay, closed, created, cancelled, fkPay].some(Boolean),
+    nothingToDo: ![delivered, intransit, msPay, msOrders, closed, created, cancelled, fkPay, fkOrders].some(Boolean),
   };
+}
+
+/** from–to split into consecutive ranges of at most `max` days, oldest first. */
+function chunks(from, to, max) {
+  const out = [];
+  for (let f = from; f <= to; f = addDays(f, max)) {
+    const t = addDays(f, max - 1) < to ? addDays(f, max - 1) : to;
+    out.push({ from: f, to: t });
+  }
+  return out;
 }
 
 function createdFilter(days) {
@@ -245,6 +276,10 @@ function mark(step, date) {
   if (!STEPS.includes(step)) throw new Error(`Unknown step "${step}". Steps: ${STEPS.join(', ')}.`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('Give the date as YYYY-MM-DD.');
   if (date >= localToday()) throw new Error(`${date} is not over yet; mark only days up to yesterday.`);
+  const ordersLimit = addDays(localToday(), -ORDERS_LAG_DAYS);
+  if (step.endsWith('.orders') && date > ordersLimit) {
+    throw new Error(`Orders run ${ORDERS_LAG_DAYS} days behind; mark ${step} only up to ${ordersLimit}.`);
+  }
   const state = readJson(STATE_FILE, {});
   // Never move a step backwards: a re-run of an older night must not re-open days.
   if (state[step] && state[step] >= date) return { ok: true, step, doneThrough: state[step], unchanged: true };

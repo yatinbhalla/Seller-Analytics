@@ -54,12 +54,20 @@ Every Supplier Panel address carries a short code for the account, written `<slu
 - A day with no payment comes back as "No data is available for these dates", which the app now accepts as an empty day.
 - Rows that overlap with a file already imported from the details page are recognised as unchanged.
 
-### 4. Orders report (on request, not nightly yet)
+### 4. Orders report (nightly, two days behind)
 
-Orders → **Download Orders Data ▾** (top right) → **Select Date Range** → From/To (at most 1 month) → **Export data**. The file appears under "Exported Files" in the same menu after a minute or two; reopen the menu to see it.
-- The file is `Orders_<from>_<to>_<export date>_<hour window>_<supplier-id>.csv`, one row per sub-order.
-- First walked through on 23 Oct for 22 Sep–21 Oct: 2,560 rows (1,967 delivered, 361 shipped, 128 cancelled, 100 RTO, 2 lost).
-- The column "Reason for Credit Entry" is the order status. The price is the supplier's price incl. GST, the same figure as the invoice's item total.
+Orders run two days behind the other downloads: the run on the 25th fetches returns and payments up to the 24th, but orders only up to the 23rd. The plan gives the ranges (`plan.meesho.orders.downloads`).
+
+1. Open the Orders page (`plan.meesho.orders.url`). It may open with a notice of its own, such as "N orders accepted successfully". Close it with **Got it**.
+2. Click **Download Orders Data ▾** at the top right, then **Select Date Range**.
+3. Pick From and To on the calendar, using **‹** and **›** to change month. The range can be at most 1 month: later days grey out once From is picked. Click **Export data**.
+   - For more than a month, export once per range in the plan. Meesho generates them side by side.
+   - On 25 Oct three 30-day exports (26 Jul–24 Aug, 25 Aug–23 Sep, 24 Sep–23 Oct) were ready within about a minute.
+4. Reopen the menu, which doesn't refresh by itself. Each export appears under "Exported Files" with its dates and a **Download** link.
+5. The file is `Orders_<from>_<to>_<export date>_<hour window>_<supplier-id>.csv`, one row per sub-order.
+   - The column "Reason for Credit Entry" is the order status: DELIVERED, SHIPPED, READY_TO_SHIP, CANCELLED, RTO_*, LOST or DOOR_STEP_EXCHANGED.
+   - The price is the supplier's price incl. GST, the same figure as the invoice's item total.
+6. **Door-step exchanges** reuse the sub-order number: the replacement parcel appears as a second row days later, with a new packet. The app keeps the earlier row, which is the sale.
 
 ### Already handled in the app
 
@@ -105,7 +113,7 @@ Every page is under `https://seller.flipkart.com/index.html#dashboard/…`.
    - On 21 Oct it showed 2 cancellations.
 3. The chosen range is saved in the page address as `order_cancellation_range`, with `date1` and `date2` in UTC, e.g. 2026-10-20T18:30Z for 21 Oct IST. The job can open the filtered list directly.
 4. Click **Download Order List**. `Cancelled-Orders.csv` downloads at once, with no request queue.
-5. **What it holds:** each row has a cancellation date, type, reason, SKU, quantity, total, payment type and invoice number, plus the buyer's name and address. The app reads only the state and PIN code.
+5. **What it holds:** each row has a cancellation date, type, reason, SKU, quantity, total, payment type and invoice number, plus the buyer's name and address. The buyer details stay in the local database only.
 6. **"Logistics Return: Yes"** marks a courier return (RTO). Both of the 21 Oct rows were RTOs, and the returns report already has the same lines with their Return IDs. The app skips them and counts them as "courier returns (already in the returns report)".
 7. **"Logistics Return: No"** marks a cancellation before dispatch, which the app could not see before. It now marks the order line cancelled, so the line leaves sales, stock and the ₹7 packaging. What its invoice said is kept, and a later reprint of the label does not bring it back.
 
@@ -129,12 +137,21 @@ Every page is under `https://seller.flipkart.com/index.html#dashboard/…`.
 - It is the same file as `samples/flipkart/payment (2).xlsx`, so the app already reads it.
 - The Request New Report form for this report hasn't been walked through yet.
 
-### 5. Orders report (on request, not nightly yet)
+### 5. Orders report (nightly, two days behind)
 
-Reports Centre → **Request New Report** → **Fulfilment Reports** → Orders → **Request Report** → One Time Request → Select Date Range → **custom** → click the start and end day → **Submit**. It was Generated within a minute on 23 Oct; download it from the Reports list.
-- The file is `<request id>_<timestamp>.xlsx`, the same shape of name as a payment report. The app tells them apart by their columns.
-- Sheets: "Help" and "Orders". 22 Sep–21 Oct had 602 order items. Statuses seen: DELIVERED, READY_TO_SHIP, RETURN_REQUESTED, RETURNED, CANCELLED, APPROVED.
-- No price column. SKUs come wrapped as `"""SKU:WH_P/1"""`; the app unwraps them.
+Like Meesho, orders run two days behind: the run on the 25th fetches orders up to the 23rd (`plan.flipkart.orders`).
+
+1. Go to **Reports → Reports Centre** (`plan.flipkart.orders.url`) and click **Request New Report**.
+2. Click **Fulfilment Reports**, then **Request Report** under "Orders".
+3. Keep **One Time Request**. Click **Select Date Range**, choose **custom**, then click the start day and the end day in the two-month calendar.
+   - On a short window the calendar is cut off. Its day cells are labelled like "Choose Sunday, July 26, 2026 as your check-in date", and its arrows "Move backward/forward to switch to the previous/next month".
+   - 26 Jul–23 Oct (90 days) was accepted on 25 Oct.
+4. Click **Submit**. Flipkart says "Report is requested successfully" and shows the Scheduled tab; switch to **Requested**.
+5. The new row ("Fulfilment Reports · Orders · <from> To <to>") shows In Progress, then Generated. On 25 Oct the 90-day report was ready within about 3 minutes. Click its **Download**.
+6. The file is `<request id>_<timestamp>.xlsx`, the same shape of name as a payment report; the app tells them apart by their columns.
+   - Its sheets are "Help" and "Orders".
+   - Statuses seen: DELIVERED, READY_TO_SHIP, RETURN_REQUESTED, RETURNED, CANCELLED, APPROVED.
+   - There is no price column. SKUs come wrapped as `"""SKU:WH_P/1"""`, and the app unwraps them.
 
 ## How the nightly job runs
 
@@ -146,7 +163,9 @@ It's built like the seller's X and LinkedIn routines: a Claude scheduled task do
   - It needs Chrome open, with the Claude extension connected.
   - Its clicks follow this file. When a page changes, update the section above and the task follows it.
 - **The script:** `npm run fetch -- <command>` (`src/fetch/nightly.js`).
-  - `plan`: what to download tonight. It works out each step's range from `data/fetch-state.json`, the last day each step got. It also lists the Meesho payment dates and Flipkart NEFT IDs already in the database. On the first run it fetches yesterday's returns and the last 30 days of payments.
+  - `plan`: what to download tonight. It works out each step's range from `data/fetch-state.json`, the last day each step got. It also lists the Meesho payment dates and Flipkart NEFT IDs already in the database.
+    - Returns, cancellations and payments go up to yesterday. Orders go up to the day before yesterday, split into ranges each site accepts (Meesho 30 days, Flipkart 90).
+    - On the first run it fetches yesterday's returns, the last 30 days of payments and the last 3 months of orders.
   - `import`: takes the files that arrived in Downloads since `plan`, matching the marketplaces' file names (nothing else is touched), and moves them into `data/fetch/<date>/`.
     - It imports them with the app's own checks: duplicates, staging, backup, read-back.
     - Clean files are committed.

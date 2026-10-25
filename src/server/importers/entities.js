@@ -76,6 +76,9 @@ export const removeRow = (db, entity, key) => stmts(db)[entity].remove.run(key);
  *   line back into sales, stock and packaging.
  * - An orders report knows less than an invoice. Over an invoice it only fills gaps
  *   (and can cancel); an invoice over an orders-report line replaces it.
+ * - Two orders-report rows of one sub-order on different order dates are a sale and
+ *   its door-step exchange: Meesho ships the replacement days later under the same
+ *   sub-order number, in a new packet. The earlier row is the sale and is kept.
  */
 export function mergeOrder(existing, incoming) {
   if (!existing) return incoming;
@@ -85,6 +88,7 @@ export function mergeOrder(existing, incoming) {
     for (const c of ENTITIES.order.columns) if (merged[c] == null && incoming[c] != null && c !== 'source') merged[c] = incoming[c];
     return merged;
   }
+  if (isExchange(known, incoming)) return incoming.order_date < known.order_date ? incoming : known;
   if (incoming.cancelled) {
     const merged = { ...known, cancelled: 1 };
     for (const c of ENTITIES.order.columns) if (merged[c] == null && incoming[c] != null) merged[c] = incoming[c];
@@ -94,6 +98,10 @@ export function mergeOrder(existing, incoming) {
 }
 
 export const isOrderReport = (order) => order?.source === 'order_report';
+
+/** Both rows from orders reports, one sub-order, two order dates: a sale and its exchange. */
+export const isExchange = (a, b) =>
+  isOrderReport(a) && isOrderReport(b) && !!a.order_date && !!b.order_date && a.order_date !== b.order_date;
 
 /**
  * Merge what a returns file says into what is already known about that return.
