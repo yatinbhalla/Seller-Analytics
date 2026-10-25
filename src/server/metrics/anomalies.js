@@ -33,6 +33,9 @@ export const ALERT_TYPES = {
 };
 
 const RANK = { high: 0, medium: 1, info: 2 };
+// The days an order from an orders report can ship on — its order day and the next
+// two, as marketplaces give 1–2 days to dispatch — before its label counts as missing.
+const LABEL_GRACE_DAYS = 3;
 const FAM = (p) => (p === 'meesho' ? 'meesho' : 'flipkart');
 const rs = (paise) => `₹${(Math.abs(paise) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const pct = (x) => `${Math.round(x * 100)}%`;
@@ -180,11 +183,25 @@ export function findAnomalies(db, f = {}, { today = localToday(), reviewed = fal
       });
     }
 
-    if (l.line_source !== 'invoice' && !l.adjustment_only && l.sale_date && labelDays.has(`${FAM(l.platform)}|${l.sale_date}`)
+    // A payment or return dates the dispatch, so its label day is that day. An
+    // orders-report line dates the order: its label is printed then or up to two days
+    // later. So it counts as missing only once that window has passed and labels were
+    // uploaded for every day of it — with a day skipped, it may have shipped that day.
+    const window = l.line_source === 'order' && l.sale_date
+      ? Array.from({ length: LABEL_GRACE_DAYS }, (_, k) => shift(l.sale_date, k))
+      : null;
+    const missing = window
+      ? l.sale_date <= shift(today, -LABEL_GRACE_DAYS) && window.every((d) => labelDays.has(`${FAM(l.platform)}|${d}`))
+      : labelDays.has(`${FAM(l.platform)}|${l.sale_date}`);
+    if (l.line_source !== 'invoice' && !l.adjustment_only && l.sale_date && missing
         && !labelled.has(`${FAM(l.platform)}|${l.order_item_key}`)) {
       add('no_label', l, {
-        title: `Order ${l.order_id || ''} is not on the ${l.sale_date} labels`,
-        detail: `There is ${{ payment: 'a payment', order: 'an orders-report line' }[l.line_source] || 'a return'} for it, and labels for that day were uploaded, but not this one.`,
+        title: window
+          ? `Order ${l.order_id || ''} is not on the labels of ${window[0]} – ${window[window.length - 1]}`
+          : `Order ${l.order_id || ''} is not on the ${l.sale_date} labels`,
+        detail: window
+          ? `The orders report has it from ${l.sale_date}, and labels were uploaded for every day it could have shipped, but not this one.`
+          : `There is ${l.line_source === 'payment' ? 'a payment' : 'a return'} for it, and labels for that day were uploaded, but not this one.`,
       });
     }
 

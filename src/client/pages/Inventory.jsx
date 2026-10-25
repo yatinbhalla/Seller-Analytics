@@ -71,7 +71,10 @@ export default function Inventory() {
             <Button variant="primary" onClick={save}>Save</Button>
             <Button variant="ghost" onClick={() => setEntry(null)}>Cancel</Button>
           </div>
-          <p className="mt-2 text-xs text-muted">Count in pieces. A 4-pack on the shelf is 4 pieces.</p>
+          <p className="mt-2 text-xs text-muted">
+            Count in pieces. A 4-pack on the shelf is 4 pieces.
+            {entry.kind === 'opening' && ' A count is taken as at the start of its date: that day\'s dispatches and everything after come off it, and earlier orders are already in it.'}
+          </p>
         </Card>
       )}
 
@@ -88,7 +91,10 @@ export default function Inventory() {
               <tr key={s.id}>
                 <td>{s.name}<div className="text-xs text-muted">{s.category_name}</div></td>
                 <td className="font-mono text-[11px] text-ink-2">{s.codes.map((c) => `${c.code}${c.qty > 1 ? ` ×${c.qty}` : ''}`).join(', ')}</td>
-                <td className={`r font-medium ${s.negative ? 'text-bad' : ''}`}>{n(s.on_hand)}</td>
+                <td className={`r font-medium ${s.negative ? 'text-bad' : ''}`}>
+                  {n(s.on_hand)}
+                  {s.counted_on && <div className="text-[11px] font-normal text-muted">counted {niceDate(s.counted_on)}</div>}
+                </td>
                 <td className="r text-ink-2">{s.packs.length > 1 ? s.packs.map((p) => `${p.possible}×${p.packOf}`).join(' · ') : '—'}</td>
                 <td className="r">{s.dailyUse || '—'}</td>
                 <td className="r">{s.daysCover ?? '—'}</td>
@@ -116,8 +122,10 @@ export default function Inventory() {
               <thead><tr><th>Date</th><th>Move</th><th className="r">Pieces</th><th>From</th></tr></thead>
               <tbody>
                 {history.rows.map((m, i) => (
-                  <tr key={i}>
-                    <td>{niceDate(m.move_date)}</td><td>{m.kind}</td><td className="r">{m.qty > 0 ? `+${m.qty}` : m.qty}</td>
+                  <tr key={i} className={m.counted ? '' : 'opacity-50'} title={m.counted ? undefined : 'Before the latest count — already in it'}>
+                    <td>{niceDate(m.move_date)}</td>
+                    <td>{m.kind}{!m.counted && <div className="text-[11px] text-muted">before the count</div>}</td>
+                    <td className="r">{m.qty > 0 ? `+${m.qty}` : m.qty}</td>
                     <td className="font-mono text-xs text-ink-2">{m.ref_type === 'manual' ? 'entered by you' : m.ref_key.split('|').slice(2).join('|')}</td>
                   </tr>
                 ))}

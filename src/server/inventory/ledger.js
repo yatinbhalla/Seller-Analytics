@@ -3,15 +3,16 @@ import { localToday } from '../lib/today.js';
 /**
  * Stock in pieces, per stock item (one design in one size).
  *
- * On hand = everything in v_stock_ledger: manual moves the seller enters (opening
- * count, purchases, adjustments, write-offs) plus dispatches and restocks derived
- * from orders and returns through each code's pack recipe.
+ * The ledger (v_stock_ledger) holds manual moves the seller enters (opening count,
+ * purchases, adjustments, write-offs) plus dispatches and restocks derived from orders
+ * and returns through each code's pack recipe. On hand (v_stock_on_hand) is the
+ * latest opening count plus the moves dated on or after it.
  */
 export function stockReport(db, today = localToday()) {
   const d14 = shift(today, -14);
   const d30 = shift(today, -30);
   const items = db
-    .prepare(`SELECT oh.stock_item_id AS id, oh.key, oh.name, oh.product_id, oh.reorder_level, oh.on_hand,
+    .prepare(`SELECT oh.stock_item_id AS id, oh.key, oh.name, oh.product_id, oh.reorder_level, oh.on_hand, oh.counted_on,
                      p.name AS product_name, c.name AS category_name,
                      COALESCE((SELECT -SUM(l.qty) FROM v_stock_ledger l WHERE l.stock_item_id = oh.stock_item_id
                                 AND l.kind = 'dispatch' AND l.move_date >= @d14), 0) AS out14,
@@ -86,9 +87,18 @@ export function addMove(db, { stockItemId, qty, kind, date, unitCostPaise = null
     .run(stockItemId, signed, kind, date, unitCostPaise, note).lastInsertRowid;
 }
 
+/** A shelf's moves, newest first; `counted` is 0 for moves the latest opening count already covers. */
 export function stockHistory(db, stockItemId, limit = 200) {
   return db
-    .prepare('SELECT * FROM v_stock_ledger WHERE stock_item_id = ? ORDER BY move_date DESC LIMIT ?')
+    .prepare(`SELECT l.*,
+                     CASE WHEN c.counted_on IS NULL THEN 1
+                          WHEN l.kind = 'opening' THEN l.move_date = c.counted_on
+                          ELSE l.move_date >= c.counted_on END AS counted
+                FROM v_stock_ledger l
+                LEFT JOIN v_stock_on_hand c ON c.stock_item_id = l.stock_item_id
+               WHERE l.stock_item_id = ?
+               -- Newest first; a count opens its day, so it sits below that day's dispatches.
+               ORDER BY l.move_date DESC, l.kind = 'opening' LIMIT ?`)
     .all(stockItemId, limit);
 }
 

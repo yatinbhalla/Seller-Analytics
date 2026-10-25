@@ -8,6 +8,7 @@ import { loadLines } from '../src/server/metrics/lines.js';
 import { areaReport, customerDetail, customerList } from '../src/server/metrics/customers.js';
 import { findAnomalies, setAnomalyReview } from '../src/server/metrics/anomalies.js';
 import { buildTools } from '../src/server/ai/tools.js';
+import { addMove, stockHistory, stockReport } from '../src/server/inventory/ledger.js';
 
 /**
  * Buyers, areas, matching files to labels, and alerts. Every buyer, address, order and
@@ -263,6 +264,50 @@ describe('alerts', () => {
     };
     expect(run('2026-09-01')).toBe(1);
     expect(run('2026-10-10')).toBe(0);
+  });
+});
+
+describe('stock counted from the opening count', () => {
+  it('takes off only the dispatches dated on or after a shelf\'s latest count', () => {
+    const db = makeDb();
+    const s = seeder(db);
+    // A 2-pack takes 2 pieces from the Black Floral shelf. Orders before, on and after the count.
+    for (const [key, date] of [['B1_1', '2026-10-01'], ['B2_1', '2026-10-09'], ['B3_1', '2026-10-10'], ['B4_1', '2026-10-15']]) {
+      s.order({ key, sku: 'WH_MFO/1', date });
+    }
+    const shelf = () => stockReport(db, '2026-10-20').find((x) => x.codes.some((c) => c.code === 'WH_MFO'));
+    // Never counted: the whole history adds up, as before.
+    expect(shelf()).toMatchObject({ on_hand: -8, counted_on: null });
+
+    addMove(db, { stockItemId: shelf().id, qty: 50, kind: 'opening', date: '2026-10-05' });
+    addMove(db, { stockItemId: shelf().id, qty: 30, kind: 'opening', date: '2026-10-10' });
+    // Latest count 30 on 10 Oct, minus the 10 Oct and 15 Oct 2-packs; the older count and orders are in it.
+    expect(shelf()).toMatchObject({ on_hand: 26, counted_on: '2026-10-10' });
+    const counted = stockHistory(db, shelf().id).map((m) => [m.move_date, m.kind, m.counted]);
+    expect(counted).toEqual([
+      ['2026-10-15', 'dispatch', 1], ['2026-10-10', 'dispatch', 1], ['2026-10-10', 'opening', 1],
+      ['2026-10-09', 'dispatch', 0], ['2026-10-05', 'opening', 0], ['2026-10-01', 'dispatch', 0],
+    ]);
+  });
+});
+
+describe('orders-report lines without a label', () => {
+  it('waits out the dispatch window before calling an order\'s label missing', () => {
+    const run = (orderDate, labelDays) => {
+      const db = makeDb();
+      const s = seeder(db);
+      labelDays.forEach((d, i) => s.order({ key: `L${i}_1`, date: d })); // labels uploaded on these days
+      s.order({ key: 'R9_1' });
+      db.prepare("UPDATE orders SET source = 'order_report', invoice_date = NULL, order_date = ? WHERE order_item_key = 'R9_1'").run(orderDate);
+      return findAnomalies(db, {}, { today: '2026-10-22' }).items.filter((a) => a.type === 'no_label').map((a) => a.title);
+    };
+    const every = ['2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21'];
+    // Ordered yesterday: not due to ship yet.
+    expect(run('2026-10-21', every)).toEqual([]);
+    // Labels came for every day it could have shipped, and it is on none.
+    expect(run('2026-10-17', every)).toEqual(['Order R9 is not on the labels of 2026-10-17 – 2026-10-19']);
+    // One day of its window had no labels uploaded: it may have shipped that day.
+    expect(run('2026-10-17', ['2026-10-17', '2026-10-19'])).toEqual([]);
   });
 });
 

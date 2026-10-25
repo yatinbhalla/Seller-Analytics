@@ -109,9 +109,21 @@ CREATE VIEW v_stock_ledger AS
                   (SELECT value FROM settings WHERE key = 'default_return_condition'),
                   'good') = 'good';
 
+-- A shelf's latest opening count resets it: on hand is that count plus every move
+-- dated on or after it. A count is taken at the start of its day, so that day's
+-- dispatches come off it; anything earlier is already in what was counted. This
+-- matters because orders reports and payment files reach back weeks before the
+-- first count. A shelf never counted adds up its whole history.
 CREATE VIEW v_stock_on_hand AS
-  SELECT si.id AS stock_item_id, si.key, si.name, si.product_id, si.reorder_level,
-         COALESCE(SUM(l.qty), 0) AS on_hand
+  WITH counted AS (
+    SELECT stock_item_id, MAX(move_date) AS counted_on FROM stock_moves WHERE kind = 'opening' GROUP BY stock_item_id
+  )
+  SELECT si.id AS stock_item_id, si.key, si.name, si.product_id, si.reorder_level, c.counted_on,
+         COALESCE(SUM(CASE WHEN c.counted_on IS NULL THEN l.qty
+                           WHEN l.kind = 'opening' THEN CASE WHEN l.move_date = c.counted_on THEN l.qty ELSE 0 END
+                           WHEN l.move_date >= c.counted_on THEN l.qty
+                           ELSE 0 END), 0) AS on_hand
     FROM stock_items si
+    LEFT JOIN counted c ON c.stock_item_id = si.id
     LEFT JOIN v_stock_ledger l ON l.stock_item_id = si.id
    GROUP BY si.id;
