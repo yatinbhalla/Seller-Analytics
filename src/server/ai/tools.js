@@ -112,7 +112,11 @@ export function buildTools(db) {
       run: (a) => {
         const p = paymentsDue(db, f(a));
         const b = (x) => ({ orders: x.lines, rs: rupees(x.paise), byPlatformRs: Object.fromEntries(Object.entries(x.byPlatform).map(([k, v]) => [k, rupees(v)])) });
-        return { windowDays: [p.min, p.max], notDue: b(p.notDue), dueNow: b(p.dueNow), overdue: b(p.overdue), next7DaysRs: rupees(p.next7Paise) };
+        return {
+          windowDays: [p.min, p.max], notDue: b(p.notDue), dueNow: b(p.dueNow), overdue: b(p.overdue), next7DaysRs: rupees(p.next7Paise),
+          // Due before the imported payment files begin: most likely paid then, so not overdue.
+          dueBeforePaymentFiles: b(p.beforePaymentFiles), paymentFilesFrom: p.paymentFilesFrom,
+        };
       },
     },
     get_tax_credits: {

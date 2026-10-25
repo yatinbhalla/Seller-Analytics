@@ -137,9 +137,10 @@ describe('profit and packaging', () => {
 });
 
 describe('payment window (paid 7–15 days after dispatch)', () => {
-  const seedWindow = (db) =>
+  const seedWindow = (db, extra = []) =>
     seed(db, {
       orders: [
+        ...extra,
         // Three settled orders give the payout estimate something to go on.
         ...[1, 2, 3].map((i) => ({ key: `s${i}_1`, sku: 'WH_MFO/1', total: 20000, date: '2026-09-20' })),
         { key: 'a_1', sku: 'WH_MFO/2', total: 20000, date: '2026-10-17' }, // 3 days: not due yet
@@ -166,13 +167,27 @@ describe('payment window (paid 7–15 days after dispatch)', () => {
     expect(p.next7Paise).toBeCloseTo(15000 + (15000 * 3) / 9, -1);
   });
 
+  it('does not call an order overdue when its payment was due before the payment files begin', () => {
+    const db = makeDb();
+    // Due by 16 Sep; the first imported payment is on 12 Oct (the seed's payment date).
+    seedWindow(db, [{ key: 'old_1', sku: 'WH_MFO/6', total: 20000, date: '2026-09-01' }]);
+    const p = paymentsDue(db, {}, '2026-10-20');
+    expect(p.overdue.lines).toBe(1); // c_1 only: due by 16 Oct, inside the files
+    expect(p.beforePaymentFiles).toMatchObject({ lines: 1, paise: 15000 });
+    expect(p.paymentFilesFrom).toEqual({ meesho: '2026-10-12' });
+    const unpaid = dataHealth(db, '2026-10-20').unpaid;
+    expect(unpaid.rows.map((r) => r.order_item_key)).toEqual(['c_1']);
+    expect(unpaid.count).toBe(1);
+  });
+
   it('flags as unpaid only what is past 15 days', () => {
     const db = makeDb();
-    seedWindow(db);
+    seedWindow(db, [{ key: 'e_1', sku: 'WH_MFO/6', total: 20000, date: '2026-10-05' }]); // day 15: last day it can pay
     const h = dataHealth(db, '2026-10-20');
     expect(h.unpaid.days).toBe(15);
-    // b_1 (10 days) is still inside the window; r_1 came back; s1–s3 are paid.
+    // b_1 (10 days) and e_1 (15) are still inside the window; r_1 came back; s1–s3 are paid.
     expect(h.unpaid.rows.map((r) => r.order_item_key)).toEqual(['c_1']);
+    expect(paymentsDue(db, {}, '2026-10-20').overdue.lines).toBe(h.unpaid.count);
   });
 });
 

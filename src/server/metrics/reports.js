@@ -357,8 +357,12 @@ export function paymentsDue(db, f, today = localToday()) {
   const { perLine } = analyse(all, lines, ctx, null);
 
   const bucket = () => ({ lines: 0, paise: 0, byPlatform: {} });
-  const out = { min, max, today, notDue: bucket(), dueNow: bucket(), overdue: bucket(), noEstimate: 0, byDay: {} };
+  const out = { min, max, today, notDue: bucket(), dueNow: bucket(), overdue: bucket(), beforePaymentFiles: bucket(), noEstimate: 0, byDay: {} };
   const dayMs = 86400000;
+  // An order is overdue only if its payment was due once the imported payment files
+  // had started: one due earlier was paid, or not, before the app's history.
+  const firstPaid = firstPaymentDates(db);
+  out.paymentFilesFrom = Object.fromEntries(firstPaid);
   for (const { line, e } of perLine) {
     if (e.settled || e.returned || e.outOfHistory || e.adjustmentOnly || !line.sale_date) continue;
     if (e.payout == null) {
@@ -366,7 +370,9 @@ export function paymentsDue(db, f, today = localToday()) {
       continue;
     }
     const age = Math.round((Date.parse(today) - Date.parse(line.sale_date)) / dayMs);
-    const b = age < min ? out.notDue : age <= max ? out.dueNow : out.overdue;
+    const dueBy = new Date(Date.parse(line.sale_date) + max * dayMs).toISOString().slice(0, 10);
+    const first = firstPaid.get(line.platform === 'meesho' ? 'meesho' : 'flipkart');
+    const b = age < min ? out.notDue : age <= max ? out.dueNow : !first || dueBy < first ? out.beforePaymentFiles : out.overdue;
     b.lines++;
     b.paise += e.payout;
     b.byPlatform[line.platform] = (b.byPlatform[line.platform] || 0) + e.payout;
@@ -387,6 +393,15 @@ export function paymentsDue(db, f, today = localToday()) {
   const weekEnd = new Date(Date.parse(today) + 6 * dayMs).toISOString().slice(0, 10);
   out.next7Paise = out.byDay.filter((d) => d.day <= weekEnd).reduce((a, d) => a + d.paise, 0);
   return out;
+}
+
+/** Per platform family ('flipkart' covers Shopsy): the first payment date in the imported payment files. */
+export function firstPaymentDates(db) {
+  return new Map(
+    db.prepare(`SELECT CASE WHEN platform = 'meesho' THEN 'meesho' ELSE 'flipkart' END AS fam, MIN(payment_date) AS d
+                  FROM settlement_lines WHERE payment_date IS NOT NULL GROUP BY fam`)
+      .all().map((r) => [r.fam, r.d]),
+  );
 }
 
 /**

@@ -32,14 +32,20 @@ export function dataHealth(db, today = localToday()) {
     .filter((fam) => anyInvoices(fam))
     .map((fam) => ({ platform: fam, days: days.filter((d) => !hit.has(`${fam}|${d}`)) }));
 
+  // Unpaid means past the last day of the window (day 15 can still pay), and only once
+  // the payment files cover the day the payment was due by: an order due before the
+  // first imported payment was settled before the history.
+  const unpaidWhere = `o.cancelled = 0 AND COALESCE(o.invoice_date, o.order_date) < @cutoff
+                 AND date(COALESCE(o.invoice_date, o.order_date), '+' || @days || ' days')
+                     >= (SELECT MIN(s.payment_date) FROM settlement_lines s WHERE ${FAM('s')} = ${FAM('o')})
+                 AND NOT EXISTS (SELECT 1 FROM settlement_lines s WHERE ${FAM('s')} = ${FAM('o')} AND s.order_item_key = o.order_item_key)
+                 AND NOT EXISTS (SELECT 1 FROM returns r WHERE ${FAM('r')} = ${FAM('o')} AND r.order_item_key = o.order_item_key)`;
+  const unpaidArgs = { cutoff: shift(today, -unpaidDays), days: unpaidDays };
   const unpaid = db
     .prepare(`SELECT o.platform, o.order_item_key, o.sku, COALESCE(o.invoice_date, o.order_date) AS sale_date, o.total_paise
-                FROM orders o
-               WHERE o.cancelled = 0 AND COALESCE(o.invoice_date, o.order_date) <= ?
-                 AND NOT EXISTS (SELECT 1 FROM settlement_lines s WHERE ${FAM('s')} = ${FAM('o')} AND s.order_item_key = o.order_item_key)
-                 AND NOT EXISTS (SELECT 1 FROM returns r WHERE ${FAM('r')} = ${FAM('o')} AND r.order_item_key = o.order_item_key)
-               ORDER BY sale_date LIMIT 500`)
-    .all(shift(today, -unpaidDays));
+                FROM orders o WHERE ${unpaidWhere} ORDER BY sale_date LIMIT 500`)
+    .all(unpaidArgs);
+  const unpaidCount = db.prepare(`SELECT COUNT(*) AS n FROM orders o WHERE ${unpaidWhere}`).get(unpaidArgs).n;
 
   const staleReturns = db
     .prepare(`SELECT platform, return_key, order_item_key, sku, return_type, reason, created_date, raw_status
@@ -85,7 +91,7 @@ export function dataHealth(db, today = localToday()) {
     integrity: integrityCheck(db),
     lastUploads,
     missingInvoiceDays,
-    unpaid: { days: unpaidDays, count: unpaid.length, rows: unpaid },
+    unpaid: { days: unpaidDays, count: unpaidCount, rows: unpaid },
     staleReturns: { days: staleDays, count: staleReturns.length, rows: staleReturns },
     paymentsWithoutInvoice: { count: paymentsWithoutInvoiceCount, rows: paymentsWithoutInvoice },
     codesWithoutCost,

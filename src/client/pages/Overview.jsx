@@ -183,6 +183,14 @@ function PaymentsDue({ filters }) {
           tone={data.overdue.lines ? 'bad' : undefined}
         />
       </div>
+      {data.beforePaymentFiles.lines > 0 && (
+        <p className="mt-2 text-xs text-muted">
+          Not counted: {n(data.beforePaymentFiles.lines)} unpaid orders ({rs(data.beforePaymentFiles.paise)}) whose payment was due before your
+          imported payment files begin{Object.keys(data.paymentFilesFrom).length
+            ? ` (${Object.entries(data.paymentFilesFrom).map(([p, d]) => `${p === 'meesho' ? 'Meesho' : 'Flipkart'} ${niceDate(d)}`).join(', ')})`
+            : ''}. They were most likely paid then.
+        </p>
+      )}
       {data.byDay.length > 0 && (
         <div className="mt-4">
           <div className="mb-1 text-xs text-muted">Expected by day (estimated payouts, spread over each order's window) — next 7 days {rs(data.next7Paise)}</div>

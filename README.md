@@ -107,7 +107,7 @@ It merges them per order line and works out real profit per product, pack size, 
 - 💸 **Real profit per order line.** Payout before TCS/TDS − cost of goods − ₹7 packaging per packet. Payouts not yet settled are estimated from similar orders and labelled *estimated*.
 - ↩️ **Returns that tell you why.** Reasons and sub-reasons per product and platform, RTO vs customer returns, return cost, and returns still open after 30 days (worth a claim).
 - 📦 **Stock that follows dispatches.** Packs of 1, 2 and 4 and `_SET` variation listings share one shelf. Good returns restock; damaged and lost ones are written off.
-- 🗓️ **Payments on the way.** Unpaid orders split into not-due, due-now and overdue, with the expected money by day.
+- 🗓️ **Payments on the way.** Unpaid orders split into not-due, due-now and overdue, with the expected money by day. An order counts as overdue only if its payment fell due after your first imported payment file.
 - 🧾 **TCS & TDS on their own page.** They're held from payouts and claimed back, so they're never in profit.
 - 🌙 **Nightly auto-download.** Missed nights are caught up, and nothing is downloaded twice.
 - 🤖 **Ask your data.** Gemini answers questions by calling the app's own metric functions, so it explains numbers and never invents them.
