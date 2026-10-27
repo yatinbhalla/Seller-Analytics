@@ -4,7 +4,7 @@ import { qs, useApi } from '../lib/api.js';
 import { buyerPath } from './Customers.jsx';
 import { useFilters } from '../lib/filters.jsx';
 import { n, niceDate, rs } from '../lib/format.js';
-import { Empty, ErrorBox, Input, Loading, PageHeader, PlatformTag, Select, Status, Button } from '../components/ui.jsx';
+import { Empty, ErrorBox, Input, Loading, Money, PageHeader, PlatformTag, Select, Status, Button } from '../components/ui.jsx';
 
 const PAGE = 200;
 
@@ -24,7 +24,7 @@ export default function Orders() {
             <option value="">All lines</option>
             <option value="returned">Returned (any)</option>
             <option value="rto">RTO only</option>
-            <option value="unsettled">Not settled yet</option>
+            <option value="unsettled">Not paid yet</option>
             <option value="cost_missing">Cost missing</option>
             <option value="repeat_buyer">From repeat buyers</option>
             <option value="frequent_returner">From frequent returners</option>
@@ -40,7 +40,7 @@ export default function Orders() {
             <thead>
               <tr>
                 <th>Date</th><th>Platform</th><th>Order</th><th>Buyer</th><th>SKU</th><th>Product</th><th className="r">Qty</th>
-                <th className="r">Invoice</th><th className="r">Payout</th><th className="r">Profit</th><th>Status</th>
+                <th className="r">Invoice</th><th className="r">Paid</th><th className="r">Profit</th><th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -57,15 +57,15 @@ export default function Orders() {
                   <td>{o.product || <span className="text-bad">Unknown code {o.code}</span>}<div className="text-xs text-muted">{o.variant}</div></td>
                   <td className="r">{o.qty}</td>
                   <td className="r">{rs(o.totalPaise)}{o.lineSource !== 'invoice' && <div className="text-[11px] text-muted">{o.priceEstimated ? 'list price' : 'no invoice'}</div>}</td>
-                  <td className="r">{rs(o.payoutPaise)}{o.estimated && o.payoutPaise != null && <div className="text-[11px] text-muted">estimated</div>}</td>
-                  <td className={`r ${o.profitPaise < 0 ? 'text-bad' : ''}`}>{o.costMissing ? <span className="text-xs text-muted">no cost</span> : rs(o.profitPaise)}</td>
+                  <td className="r">{o.paid ? <Money paise={o.payoutPaise} /> : <span className="text-xs text-muted">not paid yet</span>}</td>
+                  <td className="r">{!o.paid ? '—' : o.profitPaise == null ? <span className="text-xs text-muted">no cost</span> : <Money paise={o.profitPaise} />}</td>
                   <td>
                     {o.returned ? (
                       <Status kind={o.restocked ? 'info' : 'warn'}>
                         {o.returnType === 'rto' ? 'RTO' : 'Returned'} · {o.returnStatus === 'closed' ? (o.restocked ? 'restocked' : 'closed') : 'in transit'}
                       </Status>
                     ) : (
-                      <span className="text-xs text-ink-2">{o.estimated ? 'awaiting payment' : 'settled'}</span>
+                      <span className="text-xs text-ink-2">{o.paid ? 'paid' : 'awaiting payment'}</span>
                     )}
                   </td>
                 </tr>

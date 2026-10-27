@@ -5,6 +5,7 @@ import { stockReport } from '../inventory/ledger.js';
 import { dataHealth } from '../metrics/health.js';
 import { findAnomalies } from '../metrics/anomalies.js';
 import { areaReport } from '../metrics/customers.js';
+import { paymentReport } from '../metrics/payments.js';
 
 /**
  * The functions Gemini may call to answer "Ask your data".
@@ -23,14 +24,29 @@ const filterParams = {
 const rupees = (v) => (v == null ? null : Math.round(v) / 100);
 const pct = (v) => (v == null ? null : Math.round(v * 1000) / 10);
 
+/**
+ * Order figures (by order date) and, where the report adds them, the money from the
+ * payments received (by payment date). Profit only ever comes from payments.
+ */
 function summary(t) {
   if (!t) return null;
   return {
     orderLines: t.lines, units: t.units, salesRs: rupees(t.gmv), netSalesRs: rupees(t.netSales),
-    payoutRs: rupees(t.payout), estimatedPayoutLines: t.estimatedLines, profitRs: rupees(t.profit),
-    marginPct: pct(t.margin), returnRatePct: pct(t.returnRate), customerReturnRatePct: pct(t.customerReturnRate),
+    returnRatePct: pct(t.returnRate), customerReturnRatePct: pct(t.customerReturnRate),
     rtoRatePct: pct(t.rtoRate), returnCostRs: rupees(t.returnCost), avgDiscountPct: pct(t.avgDiscount),
-    linesWithoutCost: t.costMissingLines, topReturnReason: t.topReason?.reason ?? null,
+    topReturnReason: t.topReason?.reason ?? null,
+    ...(t.received === undefined ? {} : {
+      paymentsReceivedRs: rupees(t.received), profitFromPaymentsRs: rupees(t.profit), marginPct: pct(t.margin), paidSales: t.paidSales,
+    }),
+  };
+}
+
+/** Money from the payments received in a period. */
+function money(m) {
+  return {
+    payments: m.payments, bankRs: rupees(m.net), receivedBeforeTcsTdsRs: rupees(m.received), profitRs: rupees(m.profit),
+    marginPct: pct(m.margin), paymentsWithoutCostPrice: m.costMissing,
+    byType: Object.fromEntries(Object.entries(m.byKind).filter(([, v]) => v.n).map(([k, v]) => [k, { payments: v.n, rs: rupees(v.net), profitRs: rupees(v.profit) }])),
   };
 }
 
@@ -42,12 +58,12 @@ const f = (args) => ({ from: args.from || null, to: args.to || null, platforms: 
 export function buildTools(db) {
   return {
     get_overview: {
-      description: 'Business totals for a period: sales, payout, profit, margin, return rates, per platform, plus best and worst products.',
+      description: 'Business totals for a period: money received and profit from the payments paid in it (payment date), and the orders sent in it (order date: sales, return rates), per platform, plus best and worst products by profit from payments.',
       parameters: { type: 'object', properties: filterParams },
       run: (a) => {
         const o = overview(db, f(a));
         return {
-          total: summary(o.total), adsRs: rupees(o.ads), profitAfterAdsRs: rupees(o.profitAfterAds),
+          money: money(o.money), orders: summary(o.total),
           platforms: o.platforms.map((p) => ({ platform: p.key, ...summary(p) })),
           bestProducts: o.best.map((p) => ({ name: p.name, profitRs: rupees(p.profit), marginPct: pct(p.margin) })),
           worstProducts: o.worst.map((p) => ({ name: p.name, profitRs: rupees(p.profit), marginPct: pct(p.margin) })),
@@ -98,13 +114,23 @@ export function buildTools(db) {
       },
     },
     get_pnl: {
-      description: 'Profit and loss waterfall in total and per month per platform.',
+      description: 'Profit and loss from the payments received, by payment month and platform: what buyers paid, refunds, fees, shipping, deductions, cost of goods and packets down to profit.',
       parameters: { type: 'object', properties: filterParams },
       run: (a) => {
         const p = pnl(db, f(a));
         const conv = (w) => ({ profitRs: rupees(w.profit), steps: w.steps.map((s) => ({ label: s.label, rs: rupees(s.value) })) });
         return { total: conv(p.total), months: p.months.map((m) => ({ month: m.month, platform: m.platform, ...conv(m) })) };
       },
+    },
+    get_payments_by_sku: {
+      description: 'Payments received per SKU (platform, product code, pack size): usual payout, lowest and highest, which parts of the payment make it vary (price the buyer paid, shipping, commission, fees), and profit per paid sale. Use to explain why the same product is paid differently.',
+      parameters: { type: 'object', properties: { ...filterParams, code: { type: 'string', description: 'Only this product code, e.g. TC_BT.' } } },
+      run: (a) => paymentReport(db, { ...f(a), code: a.code || null }).skus.slice(0, 40).map((s) => ({
+        platform: s.platform, code: s.code, packOf: s.qty, product: s.product, paidSales: s.sales, returns: s.returns, rto: s.rto,
+        receivedRs: rupees(s.received), profitRs: rupees(s.profit), profitPerSaleRs: rupees(s.profitPerSale),
+        usualPayoutRs: rupees(s.payout?.usual), lowestRs: rupees(s.payout?.low), highestRs: rupees(s.payout?.high),
+        variesBy: s.payout ? s.payout.drivers.map((d) => ({ part: d.label, lowRs: rupees(d.low), highRs: rupees(d.high) })) : [],
+      })),
     },
     get_payments_due: {
       description: 'Money still to come: unsettled orders split into not due yet, due now (inside the 7–15 day payment window) and overdue, with expected amounts.',
@@ -196,13 +222,14 @@ several listing copies per SKU code.
 Rules:
 - Every number you state must come from a tool result in this conversation. Never estimate,
   extrapolate or invent figures. If the tools cannot answer, say what data is missing.
-- Money is in Indian rupees (₹). Profit already accounts for marketplace fees, cost price, and
-  ₹7 packaging per packet (charged even on returns). ${
+- Money is in Indian rupees (₹). Profit comes from the payments actually received, on the day
+  each was paid: the money paid, less cost price and ₹7 packaging per packet (charged even on
+  returns and RTO). An order not paid yet has no profit; it is money to come. ${
     getSetting(db, 'gst_mode') === 'deduct_output'
       ? 'The GST in each kept sale is taken off profit.'
       : 'Profit is before GST: the seller offsets GST on sales with input credit on purchases.'
   } TCS and TDS are claimed back, so they are not costs and are not in profit.
-- "estimated" payouts are for orders not settled yet; say so when it matters.
+- Order figures (orders, sales, return rates) use the order date; money and profit use the payment date.
 - Be concrete and brief: lead with the answer, then 2–4 bullet points of evidence, then a
   suggested action (scale / fix / stop / restock / reprice) where it fits.
 - Compare platforms when it helps: a product can win on Meesho and lose on Flipkart.

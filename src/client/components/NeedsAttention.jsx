@@ -2,56 +2,34 @@ import { Link } from 'react-router';
 import { qs, useApi } from '../lib/api.js';
 import { useFilters } from '../lib/filters.jsx';
 import { n, pct, rs } from '../lib/format.js';
-import { Card, Empty, Status } from './ui.jsx';
+import { Card, Empty, PriorityBadge, Status } from './ui.jsx';
 
-const KIND = { high: 'bad', medium: 'warn', info: 'info' };
-
-/** The Overview's first card: odd figures in the files, and the gaps worth chasing. */
+/** Home's attention list: odd figures in the files and the gaps worth chasing, most urgent first. */
 export function NeedsAttention() {
   const { filters } = useFilters();
   const { data } = useApi(`/reports/alerts${qs(filters)}`);
   if (!data) return null;
   const { counts, byType, gaps } = data;
-  const top = data.items.filter((i) => i.severity !== 'info').slice(0, 5);
-  const quiet = !counts.high && !counts.medium && !gaps.overduePayments.lines && !gaps.staleReturns.count;
+  const rows = [
+    ...byType.filter((t) => t.severity !== 'info').map((t) => ({ key: t.type, level: t.severity, label: t.label, count: t.count, paise: t.amountPaise })),
+    ...(gaps.overduePayments.lines ? [{ key: 'overdue', level: 'medium', label: 'Payments overdue', count: gaps.overduePayments.lines, paise: gaps.overduePayments.paise, to: '/payments/due' }] : []),
+    ...(gaps.staleReturns.count ? [{ key: 'stale', level: 'medium', label: `Returns open ${gaps.staleReturns.days}+ days`, count: gaps.staleReturns.count, to: '/returns' }] : []),
+  ].sort((a, b) => (a.level === b.level ? 0 : a.level === 'high' ? -1 : 1));
 
   return (
-    <Card className="mb-4" title="Needs attention" action={<Link to="/alerts" className="text-sm text-ink-2 underline">All alerts</Link>}>
-      {quiet ? (
+    <Card title="Needs attention" tone={counts.high ? 'red' : rows.length ? 'amber' : 'green'} action={<Link to="/alerts" className="text-sm text-ink-2 underline">All alerts</Link>}>
+      {!rows.length ? (
         <Status kind="good">Nothing odd in your files{counts.info ? ` (${n(counts.info)} info notes)` : ''}.</Status>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ul className="space-y-1.5 text-sm">
-            {byType.filter((t) => t.severity !== 'info').map((t) => (
-              <li key={t.type} className="flex items-baseline justify-between gap-3">
-                <Status kind={KIND[t.severity]}>{t.label}</Status>
-                <span className="num whitespace-nowrap text-ink-2">{n(t.count)}{t.amountPaise ? ` · ${rs(t.amountPaise)}` : ''}</span>
-              </li>
-            ))}
-            {gaps.overduePayments.lines > 0 && (
-              <li className="flex items-baseline justify-between gap-3">
-                <Status kind="warn">Payments overdue</Status>
-                <span className="num text-ink-2">{n(gaps.overduePayments.lines)} · {rs(gaps.overduePayments.paise)}</span>
-              </li>
-            )}
-            {gaps.staleReturns.count > 0 && (
-              <li className="flex items-baseline justify-between gap-3">
-                <Status kind="warn">Returns open {gaps.staleReturns.days}+ days</Status>
-                <span className="num text-ink-2">{n(gaps.staleReturns.count)}</span>
-              </li>
-            )}
-          </ul>
-          {top.length > 0 && (
-            <ul className="space-y-1.5 text-sm">
-              {top.map((i) => (
-                <li key={i.key} className="border-l-2 border-line pl-2">
-                  <div className="text-ink">{i.title}</div>
-                  <div className="text-xs text-muted">{i.label}{i.orderId ? ` · ${i.orderId}` : ''}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <ul className="divide-y divide-line text-sm">
+          {rows.map((r) => (
+            <li key={r.key} className="flex items-center gap-3 py-2">
+              <PriorityBadge level={r.level} />
+              <Link to={r.to || '/alerts'} className="min-w-0 flex-1 truncate text-ink hover:underline">{r.label}</Link>
+              <span className="num whitespace-nowrap text-ink-2">{n(r.count)}{r.paise ? ` · ${rs(r.paise)}` : ''}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );
@@ -67,7 +45,7 @@ export function ReturnAreas() {
   const list = [...hot(states).map((x) => ({ ...x, kind: 'State' })), ...hot(pins).map((x) => ({ ...x, kind: 'PIN' }))];
 
   return (
-    <Card title="Areas with the most returns" action={<Link to="/returns" className="text-sm text-ink-2 underline">By area</Link>}>
+    <Card title="Areas with the most returns" tone="coral" action={<Link to="/returns" className="text-sm text-ink-2 underline">By area</Link>}>
       {!list.length ? (
         <Empty>No area stands out yet. An area needs {states.minOrders}+ orders and a return rate above your {pct(states.total.returnRate)} average.</Empty>
       ) : (

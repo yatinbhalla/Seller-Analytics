@@ -9,6 +9,7 @@ import { stageFiles, discardImport, setAccepted } from '../importers/stage.js';
 import { commitImports, revertImport } from '../importers/commit.js';
 import { overview, products, productDetail, orderList, returnsReport, pnl, paymentsDue, taxCredits } from '../metrics/reports.js';
 import { dataHealth } from '../metrics/health.js';
+import { paymentList, paymentReport } from '../metrics/payments.js';
 import { findAnomalies, setAnomalyReview } from '../metrics/anomalies.js';
 import { areaReport, customerDetail, customerList } from '../metrics/customers.js';
 import { stockReport, addMove, stockHistory, deleteManualMove, setRecipe } from '../inventory/ledger.js';
@@ -115,6 +116,11 @@ router.get('/reports/orders', wrap((req) => orderList(getDb(), filters(req.query
 router.get('/reports/returns', wrap((req) => returnsReport(getDb(), filters(req.query))));
 router.get('/reports/pnl', wrap((req) => pnl(getDb(), filters(req.query))));
 router.get('/reports/health', wrap(() => dataHealth(getDb())));
+// Profit from each payment received, by payment date.
+router.get('/reports/payments', wrap((req) => paymentReport(getDb(), { ...filters(req.query), code: req.query.code || null })));
+router.get('/reports/payments/list', wrap((req) => paymentList(getDb(), { ...filters(req.query), code: req.query.code || null }, {
+  kind: String(req.query.kind || ''), q: String(req.query.q || ''), limit: Math.min(Number(req.query.limit) || 200, 1000), offset: Number(req.query.offset) || 0,
+})));
 router.get('/reports/payments-due', wrap((req) => paymentsDue(getDb(), filters(req.query))));
 router.get('/reports/tax-credits', wrap((req) => taxCredits(getDb(), filters(req.query))));
 

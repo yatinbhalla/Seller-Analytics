@@ -22,11 +22,11 @@ export default function ProductDetail() {
       <ErrorBox error={error} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat label="Sales" value={rs(t.gmv)} />
-        <Stat label="Profit" value={rs(t.profit)} sub={`Margin ${pct(t.margin)}`} tone={t.profit < 0 ? 'bad' : undefined} />
-        <Stat label="Profit / unit kept" value={rs(t.profitPerUnit)} />
-        <Stat label="Return rate" value={pct(t.returnRate)} sub={`Customer ${pct(t.customerReturnRate)} · RTO ${pct(t.rtoRate)}`} />
-        <Stat label="Return cost" value={rs(t.returnCost)} sub={`${pct(t.returnMarginHit)} of net sales`} />
+        <Stat color="blue" label="Sales (orders sent)" value={rs(t.gmv)} />
+        <Stat color="teal" label="Profit from payments" value={rs(t.profit)} sub={`${pct(t.margin)} of ${rs(t.received)} received`} tone={t.profit < 0 ? 'bad' : 'good'} />
+        <Stat color="teal" label="Profit per paid sale" value={rs(t.profitPerUnit)} sub={`${n(t.paidSales)} paid sales`} />
+        <Stat color="coral" label="Return rate" value={pct(t.returnRate)} sub={`Customer ${pct(t.customerReturnRate)} · RTO ${pct(t.rtoRate)}`} />
+        <Stat color="coral" label="Return cost" value={rs(t.returnCost)} sub={`${pct(t.returnMarginHit)} of net sales`} />
       </div>
 
       <Card className="mt-4" title="Platforms side by side">
@@ -46,11 +46,10 @@ export default function ProductDetail() {
                 {[
                   ['Order lines', 'lines', n],
                   ['Sales', 'gmv', rs],
-                  ['Payout', 'payout', rs],
-                  ['Payout / unit', 'payoutPerUnit', rs],
-                  ['Profit', 'profit', rs],
-                  ['Margin', 'margin', pct],
-                  ['Profit / unit kept', 'profitPerUnit', rs],
+                  ['Money received', 'received', rs],
+                  ['Profit from payments', 'profit', rs],
+                  ['Margin on money received', 'margin', pct],
+                  ['Profit per paid sale', 'profitPerUnit', rs],
                   ['Customer return rate', 'customerReturnRate', pct],
                   ['RTO rate', 'rtoRate', pct],
                   ['Return cost', 'returnCost', rs],

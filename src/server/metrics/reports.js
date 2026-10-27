@@ -1,8 +1,9 @@
 import { localToday } from '../lib/today.js';
 import { analyse, reasonLabel } from './aggregate.js';
-import { economicsContext, filterLines, loadLines, loadUnlinkedCosts } from './lines.js';
+import { economicsContext, filterLines, loadLines } from './lines.js';
 import { getSetting } from '../db/db.js';
-import { buyerSummaries } from './customers.js';
+import { buyerSummaries, paidMoney } from './customers.js';
+import { addPayment, breakdown, emptyMoney, filterPayments, finishMoney, loadPayments, moneyBy, moneyByOrder, paymentReport } from './payments.js';
 
 export const PLATFORMS = ['flipkart', 'shopsy', 'meesho'];
 
@@ -19,49 +20,32 @@ function base(db, f) {
 
 const strip = ({ reasons, ...rest }) => rest;
 
+/**
+ * Home. Two kinds of number, each on its own date:
+ *   money  — from the payments received in the range (payment date): what came in and
+ *            what it left as profit (metrics/payments.js);
+ *   total  — the orders sent in the range (order date): how many, sales, returns.
+ * Order lines carry no profit here; an order earns its profit when it is paid.
+ */
 export function overview(db, f) {
   const { all, lines, ctx } = base(db, f);
   const byPlatform = analyse(all, lines, ctx, (l) => l.platform);
-  const byDay = analyse(all, lines, ctx, (l) => `${l.sale_date}|${l.platform}`);
-  const byProduct = analyse(all, lines, ctx, (l) => l.product_id ?? `code:${l.raw_code}`);
-  const names = productNames(lines);
-
-  const unlinked = loadUnlinkedCosts(db, f).filter((u) => !f.platforms?.length || f.platforms.includes(u.platform));
-  const ads = unlinked.reduce((a, u) => a + (u.ads || 0), 0);
-  const otherUnlinked = unlinked.reduce((a, u) => a + (u.net || 0) - (u.ads || 0), 0);
-
-  const products = byProduct.groups
-    .filter((g) => g.profitLines > 0)
-    .map((g) => ({ key: g.key, name: names.get(g.key) || String(g.key), profit: g.profit, margin: g.margin, lines: g.lines, returnRate: g.returnRate }));
-  products.sort((a, b) => b.profit - a.profit);
+  const pay = paymentReport(db, f);
+  const money = new Map(pay.platforms.map((p) => [p.platform, p]));
 
   return {
     total: strip(byPlatform.total),
-    ads,
-    otherUnlinked,
-    profitAfterAds: byPlatform.total.profit + ads + otherUnlinked,
-    platforms: PLATFORMS.map((p) => byPlatform.groups.find((g) => g.key === p)).filter(Boolean).map(strip),
-    trend: trendRows(byDay.groups),
-    best: products.slice(0, 5),
-    worst: products.slice(-5).reverse().filter((p) => !products.slice(0, 5).includes(p)),
+    money: pay.total,
+    platforms: PLATFORMS.filter((p) => byPlatform.groups.some((g) => g.key === p) || money.has(p)).map((p) => {
+      const g = byPlatform.groups.find((x) => x.key === p);
+      const m = money.get(p);
+      return { ...(g ? strip(g) : { key: p, lines: 0, gmv: 0 }), key: p, received: m?.net || 0, profit: m?.profit || 0, margin: m?.margin ?? null, payments: m?.payments || 0 };
+    }),
+    trend: pay.days,
+    best: pay.products.slice(0, 5),
+    worst: pay.products.slice(-5).reverse().filter((p) => !pay.products.slice(0, 5).includes(p)),
     topReasons: topReasons(byPlatform.total.reasons, 8),
   };
-}
-
-function trendRows(groups) {
-  const days = new Map();
-  for (const g of groups) {
-    const [day, platform] = g.key.split('|');
-    const d = days.get(day) || { day };
-    d[`${platform}_gmv`] = g.gmv;
-    d[`${platform}_profit`] = g.profit;
-    d.gmv = (d.gmv || 0) + g.gmv;
-    d.profit = (d.profit || 0) + g.profit;
-    d.units = (d.units || 0) + g.units;
-    d.returns = (d.returns || 0) + g.returns;
-    days.set(day, d);
-  }
-  return [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 function productNames(lines) {
@@ -91,6 +75,7 @@ export function products(db, f) {
     return keys;
   });
   const by = new Map(groups.map((g) => [g.key, g]));
+  const money = productMoney(db, f);
   const tree = new Map();
   for (const l of lines) {
     const pk = l.product_id ?? `code:${l.raw_code}`;
@@ -107,8 +92,8 @@ export function products(db, f) {
     c.skus.add(l.sku);
   }
   const withPlatforms = (prefix) => {
-    const out = { all: strip(by.get(prefix)) };
-    for (const pl of PLATFORMS) if (by.has(`${prefix}|${pl}`)) out[pl] = strip(by.get(`${prefix}|${pl}`));
+    const out = { all: withPaid(by.get(prefix), money.get(prefix)) };
+    for (const pl of PLATFORMS) if (by.has(`${prefix}|${pl}`)) out[pl] = withPaid(by.get(`${prefix}|${pl}`), money.get(`${prefix}|${pl}`));
     return out;
   };
   const rows = [...tree.values()].map((p) => ({
@@ -127,15 +112,45 @@ export function products(db, f) {
         code: c.code,
         resolvedTo: c.resolvedTo,
         metrics: withPlatforms(`c:${c.code}`),
-        listings: [...c.skus].map((sku) => ({ sku, ...pickListing(by.get(`s:${sku}`)) })).sort((a, b) => b.lines - a.lines),
+        listings: [...c.skus].map((sku) => ({ sku, ...pickListing(by.get(`s:${sku}`), money.get(`s:${sku}`)) })).sort((a, b) => b.lines - a.lines),
       })),
     })),
   }));
   rows.sort((a, b) => (b.metrics.all?.gmv || 0) - (a.metrics.all?.gmv || 0));
-  return { total: strip(total), rows };
+  return { total: withPaid(total, paidTotal(db, f)), rows };
 }
 
-const pickListing = (g) => ({ lines: g.lines, units: g.units, gmv: g.gmv, returns: g.returns, profit: g.profit });
+const pickListing = (g, m) => ({ lines: g.lines, units: g.units, gmv: g.gmv, returns: g.returns, profit: m ? m.profit : 0 });
+
+/**
+ * A group's order totals (sales, returns — by order date) with its profit taken from
+ * the payments received instead (by payment date). Profit per unit is per paid sale.
+ */
+function withPaid(g, m) {
+  const sales = m ? m.byKind.sale.n : 0;
+  return {
+    ...strip(g),
+    received: m ? m.net : 0,
+    profit: m ? m.profit : 0,
+    margin: m ? m.margin : null,
+    paidSales: sales,
+    profitPerUnit: sales ? Math.round(m.profit / sales) : null,
+    profitIncomplete: !!m?.costMissing,
+  };
+}
+
+const paidTotal = (db, f) => finishMoney(filterPayments(loadPayments(db), f).reduce(addPayment, emptyMoney()));
+
+/** Payment money grouped the way the Products pages group order lines. */
+function productMoney(db, f) {
+  return moneyBy(filterPayments(loadPayments(db), f), (e) => {
+    const p = e.productId ?? `code:${e.rawCode}`;
+    const keys = [`p:${p}`, `p:${p}|${e.platform}`, `pl:${e.platform}`, `c:${e.rawCode}`, `c:${e.rawCode}|${e.platform}`];
+    if (e.variantId) keys.push(`v:${e.variantId}`, `v:${e.variantId}|${e.platform}`);
+    if (e.sku) keys.push(`s:${e.sku}`);
+    return keys;
+  });
+}
 
 /** One product: variants × platforms, reasons per platform, price history, listing copies. */
 export function productDetail(db, productId, f) {
@@ -146,6 +161,8 @@ export function productDetail(db, productId, f) {
     `wk:${weekOf(l.sale_date)}|${l.platform}`, `s:${l.sku}`,
   ]);
   const by = new Map(res.groups.map((g) => [g.key, g]));
+  const pf = { ...f, productId };
+  const money = productMoney(db, pf);
   const product = db.prepare(`SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ?`).get(productId);
   const variants = db.prepare('SELECT * FROM variants WHERE product_id = ? ORDER BY pack_of, label').all(productId);
 
@@ -159,16 +176,16 @@ export function productDetail(db, productId, f) {
 
   return {
     product,
-    total: strip(res.total),
+    total: withPaid(res.total, paidTotal(db, pf)),
     reasons: topReasons(res.total.reasons, 10),
-    platforms: PLATFORMS.filter((p) => by.has(`pl:${p}`)).map((p) => ({ platform: p, ...strip(by.get(`pl:${p}`)), reasons: topReasons(by.get(`pl:${p}`).reasons, 5) })),
+    platforms: PLATFORMS.filter((p) => by.has(`pl:${p}`)).map((p) => ({ platform: p, ...withPaid(by.get(`pl:${p}`), money.get(`pl:${p}`)), reasons: topReasons(by.get(`pl:${p}`).reasons, 5) })),
     variants: variants.map((v) => ({
       ...v,
-      all: by.has(`v:${v.id}`) ? strip(by.get(`v:${v.id}`)) : null,
-      byPlatform: Object.fromEntries(PLATFORMS.filter((p) => by.has(`v:${v.id}|${p}`)).map((p) => [p, strip(by.get(`v:${v.id}|${p}`))])),
+      all: by.has(`v:${v.id}`) ? withPaid(by.get(`v:${v.id}`), money.get(`v:${v.id}`)) : null,
+      byPlatform: Object.fromEntries(PLATFORMS.filter((p) => by.has(`v:${v.id}|${p}`)).map((p) => [p, withPaid(by.get(`v:${v.id}|${p}`), money.get(`v:${v.id}|${p}`))])),
     })),
     priceHistory,
-    listings: res.groups.filter((g) => g.key.startsWith('s:')).map((g) => ({ sku: g.key.slice(2), ...pickListing(g) })).sort((a, b) => b.lines - a.lines),
+    listings: res.groups.filter((g) => g.key.startsWith('s:')).map((g) => ({ sku: g.key.slice(2), ...pickListing(g, money.get(g.key)) })).sort((a, b) => b.lines - a.lines),
     codes: db.prepare(`SELECT cat.code, cat.display_code, cat.variant_label, cat.mrp_paise, cat.flipkart_price_paise, cat.meesho_price_paise,
                               (SELECT COUNT(*) FROM listings l WHERE l.code = cat.code) AS listing_copies
                          FROM v_catalog cat WHERE cat.product_id = ? ORDER BY cat.pack_of, cat.code`).all(productId),
@@ -189,13 +206,14 @@ export function orderList(db, f, { q = '', status = '', limit = 200, offset = 0 
   const needle = q.trim().toLowerCase();
   const { perLine } = analyse(all, lines, ctx, null);
   const buyers = buyerSummaries(db, {});
+  const paid = moneyByOrder(db);
   const rows = perLine
     .filter(({ line, e }) => {
       const text = `${line.order_id} ${line.order_item_key} ${line.sku} ${line.product_name || ''} ${line.buyer_name || ''} ${line.ship_city || ''} ${line.ship_pincode || ''}`;
       if (needle && !text.toLowerCase().includes(needle)) return false;
       if (status === 'returned' && !e.returned) return false;
       if (status === 'rto' && e.returnType !== 'rto') return false;
-      if (status === 'unsettled' && e.settled) return false;
+      if (status === 'unsettled' && paid.has(line.natural_key)) return false;
       if (status === 'cost_missing' && !e.costMissing) return false;
       if (status === 'repeat_buyer' && !buyers.get(line.buyer_key)?.flags.repeat) return false;
       if (status === 'frequent_returner' && !buyers.get(line.buyer_key)?.flags.frequentReturner) return false;
@@ -211,7 +229,7 @@ export function orderList(db, f, { q = '', status = '', limit = 200, offset = 0 
     rows: rows.slice(offset, offset + limit).map(({ line, e }) => ({
       key: line.natural_key, id: line.id, lineSource: line.line_source, priceEstimated: !!line.price_estimated, platform: line.platform, saleDate: line.sale_date, orderId: line.order_id, itemKey: line.order_item_key,
       sku: line.sku, code: line.code || line.raw_code, product: line.product_name, variant: line.variant_label, qty: line.qty,
-      totalPaise: line.total_paise, payoutPaise: e.payout, estimated: e.estimated, profitPaise: e.profit, costMissing: e.costMissing,
+      totalPaise: line.total_paise, ...paidMoney(paid.get(line.natural_key)), costMissing: e.costMissing,
       packagingPaise: e.packaging, returned: e.returned, returnType: e.returnType, returnStatus: line.return_status,
       returnReason: line.return_reason, restocked: e.restocked,
       buyerName: line.buyer_name, city: line.ship_city, state: line.ship_state, pincode: line.ship_pincode,
@@ -277,63 +295,21 @@ export function returnsReport(db, f) {
   };
 }
 
-/** Monthly P&L per platform, as a waterfall that always adds up. */
+/**
+ * Monthly P&L per platform from the payments received (by payment date), as steps
+ * that always add up to the profit (payments.js breakdown).
+ */
 export function pnl(db, f) {
-  const { all, lines, ctx } = base(db, f);
-  const res = analyse(all, lines, ctx, (l) => [`${(l.sale_date || '').slice(0, 7)}|all`, `${(l.sale_date || '').slice(0, 7)}|${l.platform}`]);
-  const unlinked = loadUnlinkedCosts(db, f).filter((u) => !f.platforms?.length || f.platforms.includes(u.platform));
-  const ads = unlinked.reduce((a, u) => a + (u.ads || 0), 0);
+  const events = filterPayments(loadPayments(db), f);
+  const months = moneyBy(events, (e) => (e.date ? [`${e.date.slice(0, 7)}|all`, `${e.date.slice(0, 7)}|${e.platform}`] : null));
   return {
-    total: waterfall(res.total, ads),
-    months: res.groups
-      .map((g) => {
-        const [month, platform] = g.key.split('|');
-        return { month, platform, ...waterfall(g, 0) };
+    total: breakdown(events.reduce(addPayment, emptyMoney())),
+    months: [...months]
+      .map(([k, m]) => {
+        const [month, platform] = k.split('|');
+        return { month, platform, ...breakdown(m) };
       })
       .sort((a, b) => a.month.localeCompare(b.month) || a.platform.localeCompare(b.platform)),
-  };
-}
-
-/**
- * Sales down to profit. "Other / rounding" is whatever the named steps do not explain
- * (invoice vs settlement differences, offers, unsettled estimates), so the bars always
- * reconcile to the profit figure.
- */
-function waterfall(t, ads) {
-  const fees = Object.values(t.fees).reduce((a, b) => a + b, 0);
-  const steps = [
-    { label: 'Sales', value: t.gmv },
-    { label: 'Returned sales', value: -t.returnedGmv },
-    { label: 'Marketplace fees (settled)', value: fees - t.fees.claim - t.fees.taxWithheld },
-    { label: 'Claims & compensation', value: t.fees.claim },
-    { label: 'Estimated fees (not settled yet)', value: t.payoutEstimated + t.taxCreditEstimated - t.payoutEstimatedReturns - t.estimatedKeptGmv },
-    { label: 'Estimated return charges (not settled yet)', value: t.payoutEstimatedReturns },
-    { label: 'Refunds, recoveries & claims on earlier sales', value: t.adjustments },
-  ];
-  // TCS and TDS are not in the P&L at all: you claim them back, so the payout is shown
-  // before them. What was held back is on the TCS & TDS page.
-  const payoutBeforeTax = t.payout + t.taxCredit;
-  const explained = steps.reduce((a, s) => a + s.value, 0);
-  steps.push({ label: 'Other (GST on fees, offers, refunds not settled yet)', value: payoutBeforeTax - explained });
-  steps.push({ label: '= Payout (before TCS/TDS)', value: payoutBeforeTax, subtotal: true });
-  if (t.gst) steps.push({ label: 'GST on kept sales', value: -t.gst });
-  steps.push({ label: 'Cost of goods', value: -t.cogs });
-  steps.push({ label: 'Packaging (₹7 / packet)', value: -(t.packaging - t.packagingOnReturns) });
-  steps.push({ label: 'Packaging lost on returns', value: -t.packagingOnReturns });
-  if (ads) steps.push({ label: 'Ads', value: ads });
-
-  // Lines with no cost price (or no payout estimate yet) are left out of profit
-  // rather than counted at zero cost. Showing that as its own bar keeps the
-  // waterfall adding up AND makes the gap visible.
-  const profit = t.profit + ads;
-  const beforeExclusion = steps.filter((s) => !s.subtotal).reduce((a, s) => a + s.value, 0);
-  if (beforeExclusion !== profit) {
-    steps.push({ label: 'Left out: lines without a cost or payout', value: profit - beforeExclusion, lines: t.costMissingLines + t.unsettledLines });
-  }
-  steps.push({ label: '= Profit', value: profit, subtotal: true });
-  return {
-    steps, profit, complete: t.costMissingLines === 0, costMissingLines: t.costMissingLines, estimatedLines: t.estimatedLines, lines: t.lines,
-    taxHeldPaise: t.taxCredit, taxHeldEstimatedPaise: t.taxCreditEstimated, bankPayoutPaise: t.payout,
   };
 }
 

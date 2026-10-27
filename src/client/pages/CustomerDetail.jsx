@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router';
 import { useApi } from '../lib/api.js';
 import { n, niceDate, pct, rs } from '../lib/format.js';
-import { Card, Empty, ErrorBox, PageHeader, PlatformTag, Stat, Status } from '../components/ui.jsx';
+import { Card, Empty, ErrorBox, Money, PageHeader, PlatformTag, Stat, Status } from '../components/ui.jsx';
 import BuyerFlags from '../components/BuyerFlags.jsx';
 
 const OUTCOME = {
@@ -32,7 +32,7 @@ export default function CustomerDetail() {
         <Stat label="Returned" value={n(data.returned)} sub={`${pct(delivered ? data.returned / delivered : 0)} of delivered orders`} tone={data.returned ? 'bad' : undefined} />
         <Stat label="RTO" value={n(data.rto)} sub={`${n(data.codOrders)} COD orders`} />
         <Stat label="Cancelled" value={n(data.cancelled)} />
-        <Stat label="Profit from this buyer" value={rs(data.profit)} sub={data.profitKnown ? 'after fees, cost and packaging' : 'part estimated'} tone={data.profit < 0 ? 'bad' : undefined} />
+        <Stat label="Profit from this buyer" value={rs(data.profit)} sub={data.profitKnown ? 'from the payments received, after cost and packaging' : 'some payments have no cost price'} tone={data.profit < 0 ? 'bad' : undefined} />
       </div>
 
       <Card className="mt-4" title="Order history">
@@ -56,7 +56,7 @@ export default function CustomerDetail() {
                       <Status kind={out.kind}>{out.label}</Status>
                       {o.reason && <div className="text-xs text-ink-2">{o.reason}</div>}
                     </td>
-                    <td className={`r ${o.profitPaise < 0 ? 'text-bad' : ''}`}>{o.profitPaise != null ? rs(o.profitPaise) : '—'}{o.estimated && <div className="text-[11px] text-muted">estimated</div>}</td>
+                    <td className="r">{o.profitPaise != null ? <Money paise={o.profitPaise} /> : <span className="text-xs text-muted">{o.paid === false ? 'not paid yet' : '—'}</span>}</td>
                     <td className="text-xs text-ink-2">{[o.address, o.city].filter(Boolean).join(', ') || '—'}</td>
                   </tr>
                 );

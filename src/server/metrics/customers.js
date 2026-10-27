@@ -1,5 +1,6 @@
 import { analyse, reasonLabel } from './aggregate.js';
 import { economicsContext, filterLines, loadLines } from './lines.js';
+import { moneyByOrder } from './payments.js';
 
 /**
  * Buyers and areas, from the names and addresses on labels.
@@ -63,6 +64,8 @@ export function buyerSummaries(db, f = {}) {
   const withBuyer = lines.filter((l) => l.buyer_key);
   const { perLine } = analyse(all, withBuyer, ctx, null);
   const cancelled = cancelledByBuyer(db, f);
+  // Profit is what this buyer's orders have actually been paid, less their costs.
+  const paid = moneyByOrder(db);
   const buyers = new Map();
   const get = (key) => {
     let b = buyers.get(key);
@@ -101,8 +104,11 @@ export function buyerSummaries(db, f = {}) {
         b.reasons[r] = (b.reasons[r] || 0) + 1;
       }
     }
-    if (e.profit == null) b.profitKnown = false;
-    else b.profit += e.profit;
+    const m = paid.get(line.natural_key);
+    if (m) {
+      b.profit += m.profit;
+      if (m.costMissing) b.profitKnown = false;
+    }
   }
   // A buyer whose only orders were cancelled still shows, from the orders table.
   for (const [key, n] of cancelled) {
@@ -155,6 +161,11 @@ export function customerList(db, f, { q = '', flag = '' } = {}) {
   };
 }
 
+/** An order's money from its payments; not paid yet means no profit yet. */
+export function paidMoney(m) {
+  return m ? { paid: true, payoutPaise: m.net, profitPaise: m.costMissing ? null : m.profit } : { paid: false, payoutPaise: null, profitPaise: null };
+}
+
 /** One buyer: their totals and every order, with how it went. */
 export function customerDetail(db, key) {
   const summary = buyerSummaries(db, {}).get(key) || null;
@@ -162,6 +173,7 @@ export function customerDetail(db, key) {
   const all = loadLines(db, {});
   const mine = all.filter((l) => l.buyer_key === key);
   const { perLine } = analyse(all, mine, economicsContext(db), null);
+  const paid = moneyByOrder(db);
   const orders = perLine
     .filter(({ e }) => !e.outOfHistory && !e.adjustmentOnly)
     .map(({ line, e }) => ({
@@ -169,7 +181,7 @@ export function customerDetail(db, key) {
       product: line.product_name, variant: line.variant_label, qty: line.qty, totalPaise: line.total_paise,
       paymentMode: line.payment_mode, awb: line.awb, address: line.ship_address, city: line.ship_city,
       outcome: outcome(line, e), reason: e.returned && e.returnType !== 'rto' ? reasonLabel(line) : null,
-      returnStatus: line.return_status, payoutPaise: e.payout, profitPaise: e.profit, estimated: e.estimated,
+      returnStatus: line.return_status, ...paidMoney(paid.get(line.natural_key)),
     }));
   const cancelled = db
     .prepare(`SELECT natural_key, platform, order_id, sku, total_paise, COALESCE(invoice_date, order_date) AS date, payment_mode, ship_address, ship_city
@@ -203,11 +215,19 @@ export function areaReport(db, f, { level = 'state', state = '', city = '' } = {
   const scoped = lines.filter((l) => (!state || l.ship_state === state) && (!city || LEVELS.city(l) === city));
   const known = scoped.filter((l) => keyOf(l));
   const { total, groups } = analyse(all, known, ctx, keyOf);
+  // Profit per area from the payments its orders have received.
+  const paid = moneyByOrder(db);
+  const areaProfit = new Map();
+  for (const l of known) {
+    const m = paid.get(l.natural_key);
+    if (m) areaProfit.set(keyOf(l), (areaProfit.get(keyOf(l)) || 0) + m.profit);
+  }
+  areaProfit.set('all', [...areaProfit.values()].reduce((a, v) => a + v, 0));
   const byMode = analyse(all, known.filter((l) => l.payment_mode), ctx, (l) => l.payment_mode).groups;
   const pick = (g) => ({
     key: g.key, orders: g.lines, gmv: g.gmv, returnsCustomer: g.returnsCustomer, returnsRto: g.returnsRto,
     returnRate: g.returnRate, customerReturnRate: g.customerReturnRate, rtoRate: g.rtoRate, returnCost: g.returnCost,
-    profit: g.profit, topReason: g.topReason,
+    profit: areaProfit.get(g.key) || 0, topReason: g.topReason,
   });
   const rows = groups.map((g) => {
     const row = pick(g);

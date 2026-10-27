@@ -32,9 +32,9 @@ function TrendTooltip({ active, payload, label, valueKey }) {
  * Daily sales (or profit) per platform. One y-axis, one measure — profit and sales
  * are two separate charts, never a dual axis.
  */
-export function TrendChart({ rows, measure = 'gmv', platforms }) {
+export function TrendChart({ rows, measure = 'gmv', platforms, empty = 'No orders in this range.' }) {
   const shown = PLATFORMS.filter((p) => rows.some((r) => r[`${p.key}_${measure}`] != null) && (!platforms?.length || platforms.includes(p.key)));
-  if (!rows.length) return <div className="py-10 text-center text-sm text-ink-2">No orders in this range.</div>;
+  if (!rows.length) return <div className="py-10 text-center text-sm text-ink-2">{empty}</div>;
   return (
     <div>
       <Legend items={shown.map((p) => ({ label: p.label, color: p.color, kind: 'line' }))} />
@@ -126,7 +126,7 @@ export function Waterfall({ steps }) {
               {data.map((d, i) => (
                 <Cell
                   key={d.label}
-                  fill={d.subtotal ? 'var(--ink-2)' : d.value >= 0 ? 'var(--series)' : 'var(--serious)'}
+                  fill={d.subtotal ? 'var(--ink-2)' : d.value >= 0 ? 'var(--good)' : 'var(--bad)'}
                   fillOpacity={hover == null || hover === i ? 1 : 0.6}
                 />
               ))}
@@ -139,7 +139,9 @@ export function Waterfall({ steps }) {
           {data.map((d) => (
             <tr key={d.label} className={d.subtotal ? 'font-semibold' : ''}>
               <td>{d.label}</td>
-              <td className="r">{d.subtotal ? rs(d.value) : `${d.value >= 0 ? '+' : '−'} ${rs(Math.abs(d.value))}`}</td>
+              <td className={`r ${d.subtotal ? '' : d.value > 0 ? 'text-green-700 dark:text-green-400' : d.value < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                {d.subtotal ? rs(d.value) : `${d.value >= 0 ? '+' : '−'} ${rs(Math.abs(d.value))}`}
+              </td>
             </tr>
           ))}
         </tbody>

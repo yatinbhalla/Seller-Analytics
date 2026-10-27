@@ -25,7 +25,8 @@ export async function digest(db, { from, to }) {
   const prevTo = shift(from, -1);
   const prevFrom = shift(prevTo, -(days - 1));
   const slim = (o) => ({
-    total: brief(o.total),
+    money: { paymentsReceivedRs: rupees(o.money.received), profitRs: rupees(o.money.profit), marginPct: o.money.margin == null ? null : Math.round(o.money.margin * 1000) / 10 },
+    orders: brief(o.total),
     platforms: o.platforms.map((p) => ({ platform: p.key, ...brief(p) })),
     best: o.best.map((p) => ({ name: p.name, profitRs: rupees(p.profit) })),
     worst: o.worst.map((p) => ({ name: p.name, profitRs: rupees(p.profit) })),
@@ -73,8 +74,11 @@ Counts must be counted from the list above.`;
 function brief(t) {
   if (!t) return null;
   return {
-    lines: t.lines, units: t.units, salesRs: rupees(t.gmv), payoutRs: rupees(t.payout), profitRs: rupees(t.profit),
-    marginPct: t.margin == null ? null : Math.round(t.margin * 1000) / 10,
+    lines: t.lines, units: t.units, salesRs: rupees(t.gmv),
+    // Profit only from payments received; order totals carry none.
+    ...(t.received === undefined ? {} : {
+      paymentsReceivedRs: rupees(t.received), profitRs: rupees(t.profit), marginPct: t.margin == null ? null : Math.round(t.margin * 1000) / 10,
+    }),
     returnRatePct: Math.round(t.returnRate * 1000) / 10, rtoRatePct: Math.round(t.rtoRate * 1000) / 10,
     returnCostRs: rupees(t.returnCost),
   };

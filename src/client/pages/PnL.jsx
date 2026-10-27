@@ -13,7 +13,7 @@ export default function PnL() {
 
   const months = useMemo(() => (data ? [...new Set(data.months.map((m) => m.month))].sort().reverse() : []), [data]);
   if (!data) return <><ErrorBox error={error} />{!error && <Empty>Loading…</Empty>}</>;
-  if (!data.total.lines) return <><PageHeader title="Profit & loss" /><Empty>No orders in this range.</Empty></>;
+  if (!data.total.payments) return <><PageHeader title="Profit breakdown" /><Empty>No payments in this range.</Empty></>;
 
   const selected = view === 'total' ? data.total : data.months.find((m) => `${m.month}|${m.platform}` === view);
   // Every step label that appears in any month, in waterfall order, profit last.
@@ -22,7 +22,7 @@ export default function PnL() {
 
   return (
     <Loading loading={loading}>
-      <PageHeader title="Profit & loss" subtitle="From invoiced sales down to profit. Every bar is a real figure, and the steps always add up to the profit.">
+      <PageHeader title="Profit breakdown" subtitle="From what buyers paid down to profit, for the payments received in this range. The steps always add up to the profit.">
         <Select value={view} onChange={(e) => setView(e.target.value)} aria-label="Period">
           <option value="total">Whole range</option>
           {data.months.map((m) => (
@@ -33,25 +33,20 @@ export default function PnL() {
         </Select>
       </PageHeader>
       <ErrorBox error={error} />
-      {(selected.costMissingLines > 0 || selected.estimatedLines > 0) && (
-        <Notice>
-          {selected.estimatedLines > 0 && <>{n(selected.estimatedLines)} lines use estimated payouts until their settlement is imported. </>}
-          {selected.costMissingLines > 0 && <>{n(selected.costMissingLines)} lines have no cost price and are left out of profit.</>}
-        </Notice>
+      {selected.costMissing > 0 && (
+        <Notice>{n(selected.costMissing)} payments are for products with no cost price and are left out of profit.</Notice>
       )}
-      <Card title={view === 'total' ? 'Whole range' : view.replace('|', ' · ')}>
+      <Card tone="green" title={view === 'total' ? `Whole range · ${n(selected.payments)} payments` : `${view.replace('|', ' · ')} · ${n(selected.payments)} payments`}>
         <Waterfall steps={selected.steps} />
-        {selected.taxHeldPaise > 0 && (
+        {selected.taxHeldPaise !== 0 && (
           <p className="mt-3 text-xs text-ink-2">
-            Payout is shown before TCS/TDS. {rs(selected.taxHeldPaise)} of it is held back as TCS/TDS
-            {selected.taxHeldEstimatedPaise > 0 && <> ({rs(selected.taxHeldEstimatedPaise)} of that estimated, on orders not paid yet)</>}, so the
-            bank amount is {rs(selected.bankPayoutPaise)}. You claim it back, so it is not a cost — see{' '}
-            <Link to="/tax" className="text-series underline">TCS &amp; TDS</Link>.
+            The steps run before TCS/TDS. {rs(selected.taxHeldPaise)} was held back as TCS/TDS, so the bank received {rs(selected.bankPaise)}.
+            You claim it back, so it is not a cost — see <Link to="/tax" className="text-series underline">TCS &amp; TDS</Link>.
           </p>
         )}
       </Card>
 
-      <Card className="mt-4" title="Month by month">
+      <Card className="mt-4" title="Month by month (by payment date)">
         <div className="overflow-x-auto">
           <table className="data">
             <thead>

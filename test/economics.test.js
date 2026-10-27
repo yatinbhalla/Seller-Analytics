@@ -66,8 +66,9 @@ describe('profit and packaging', () => {
     expect(t.packagingOnReturns).toBe(1400);
     // Both came back in good condition, so no COGS lost: cost = ₹7 + ₹7 + ₹65 reverse charges.
     expect(t.returnCost).toBe(700 + 700 + 6500);
+    // The P&L comes from the payments: both return payments carry their packet.
     const steps = pnl(db, {}).total.steps;
-    expect(steps.find((s) => s.label === 'Packaging lost on returns').value).toBe(-1400);
+    expect(steps.find((s) => s.label === 'Packets (₹7 each)').value).toBe(-1400);
   });
 
   it('charges COGS for a return that came back damaged or was lost, not for a restocked one', () => {
@@ -245,9 +246,9 @@ describe('TCS and TDS', () => {
     db.prepare("UPDATE settlement_lines SET tcs_paise = -100, tds_paise = -20, payment_date = '2026-10-12', settlement_ref = 'UTR1'").run();
     const w = pnl(db, {}).total;
     expect(w.steps.some((s) => /TCS|TDS/.test(s.label) && !s.subtotal)).toBe(false);
-    expect(w.steps.find((s) => s.label === '= Payout (before TCS/TDS)').value).toBe(20900);
+    expect(w.steps.find((s) => s.label === '= Received (before TCS/TDS)').value).toBe(20900);
     expect(w.taxHeldPaise).toBe(120);
-    expect(w.bankPayoutPaise).toBe(20780);
+    expect(w.bankPaise).toBe(20780);
     // Profit is the same as if the TCS/TDS had never been held back.
     expect(w.profit).toBe(20900 - 12000 - 700);
     const t = taxCredits(db, {});

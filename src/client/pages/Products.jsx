@@ -3,16 +3,17 @@ import { Link } from 'react-router';
 import { qs, useApi } from '../lib/api.js';
 import { useFilters } from '../lib/filters.jsx';
 import { n, pct, PLATFORMS, rs } from '../lib/format.js';
-import { Empty, ErrorBox, Input, Loading, PageHeader, Select } from '../components/ui.jsx';
+import { Empty, ErrorBox, Input, Loading, Money, PageHeader, Select } from '../components/ui.jsx';
 
 const METRICS = [
-  { key: 'profit', label: 'Profit', fmt: rs, sortable: true },
+  { key: 'profit', label: 'Profit (payments)', fmt: rs, sortable: true },
+  { key: 'received', label: 'Money received', fmt: rs },
   { key: 'gmv', label: 'Sales', fmt: rs },
   { key: 'lines', label: 'Order lines', fmt: n },
   { key: 'margin', label: 'Margin', fmt: pct },
   { key: 'returnRate', label: 'Return rate', fmt: pct },
   { key: 'rtoRate', label: 'RTO rate', fmt: pct },
-  { key: 'profitPerUnit', label: 'Profit / unit kept', fmt: rs },
+  { key: 'profitPerUnit', label: 'Profit per paid sale', fmt: rs },
   { key: 'returnCost', label: 'Return cost', fmt: rs },
 ];
 
@@ -85,7 +86,7 @@ export default function Products() {
                   <>
                     {th('lines', 'Lines')}
                     {th('gmv', 'Sales')}
-                    {th('payout', 'Payout')}
+                    {th('received', 'Received')}
                     {th('profit', 'Profit')}
                     {th('margin', 'Margin')}
                     {th('returnRate', 'Returns')}
@@ -172,8 +173,8 @@ function Row({ depth, label, metrics, compare, metric, platforms, open, onToggle
         <>
           <td className="r">{n(a.lines)}</td>
           <td className="r">{rs(a.gmv)}</td>
-          <td className="r">{rs(a.payout)}</td>
-          <td className={`r ${a.profit < 0 ? 'text-bad' : ''}`}>{a.profitLines ? rs(a.profit) : '—'}</td>
+          <td className="r">{rs(a.received)}</td>
+          <td className="r">{a.paidSales ? <Money paise={a.profit} /> : '—'}</td>
           <td className="r">{pct(a.margin)}</td>
           <td className="r">{pct(a.customerReturnRate)}</td>
           <td className="r">{pct(a.rtoRate)}</td>

@@ -66,10 +66,10 @@ So "which products should I scale, fix or stop?" gets answered from memory and p
 - return-created and return-closure reports
 - cancellations
 
-It merges them per order line and works out real profit per product, pack size, SKU and listing, on each platform and combined. Every upload is previewed before it is saved. Overlapping daily files merge instead of doubling. Every figure traces back to the file and row it came from.
+It merges them per order line and works out real profit from every payment received, per product, pack size, SKU and listing, on each platform and combined. Every upload is previewed before it is saved. Overlapping daily files merge instead of doubling. Every figure traces back to the file and row it came from.
 
 **Why it matters.**
-- Profit is counted **after** returns, RTO, packaging and cost of goods, not just as revenue.
+- Profit is counted from the **payments actually received**, after returns, RTO, packaging and cost of goods, not from orders that may still be cancelled or come back.
 - Return reasons are visible per product and platform.
 - Money still on its way from the marketplaces is tracked by due date.
 - Stock follows the actual dispatches.
@@ -92,7 +92,7 @@ It merges them per order line and works out real profit per product, pack size, 
   - payment windows
   - packs of 1, 2 and 4 drawing on one shared stock shelf
 - **Automated** the daily routine. A nightly Claude scheduled task downloads the reports in the seller's own Chrome, and a local script works out what's missing, imports it and raises a WhatsApp alert only when something needs attention.
-- **Validated** with 89 automated tests, including golden tests that run on real export files when they are present.
+- **Validated** with 110 automated tests, including golden tests that run on real export files when they are present.
 
 ---
 
@@ -104,7 +104,9 @@ It merges them per order line and works out real profit per product, pack size, 
 - 🔁 **Overlapping files merge; they never double.** The same order in Monday's and Tuesday's download lands once. Repeated files are recognised by SHA-256. A changed amount stops and asks.
 - 👀 **Preview before commit.** For every file you see new, updated, already-known and set-aside rows, money totals, date range and new SKU codes.
 - ✅ **Commits that check themselves.** One transaction per batch, a backup first, and every row read back and compared to the paisa before it closes. Any import can be undone.
-- 💸 **Real profit per order line.** Payout before TCS/TDS − cost of goods − ₹7 packaging per packet. Payouts not yet settled are estimated from similar orders and labelled *estimated*.
+- 💸 **Profit from every payment received.** Each payment is analysed when it arrives: money received − cost of goods − ₹7 packet. Orders not paid yet carry no profit; they are money to come.
+- 🔍 **Why the same SKU is paid differently.** For each SKU: the usual payout, the lowest and highest, and which part of the payment moves it (the price the buyer paid, shipping, commission, fees). Each payment's gap from the usual one splits into those parts, to the rupee.
+- 🎨 **Simple and colour-coded.** Eight areas, each with its own colour. Priorities in red, amber and blue; money in green, money out in red.
 - ↩️ **Returns that tell you why.** Reasons and sub-reasons per product and platform, RTO vs customer returns, return cost, and returns still open after 30 days (worth a claim).
 - 📦 **Stock that follows dispatches.** Packs of 1, 2 and 4 and `_SET` variation listings share one shelf. Good returns restock; damaged and lost ones are written off.
 - 🗓️ **Payments on the way.** Unpaid orders split into not-due, due-now and overdue, with the expected money by day. An order counts as overdue only if its payment fell due after your first imported payment file.
@@ -188,11 +190,16 @@ The preview also lists any **new SKU codes**, which you can give a cost right th
 
 ## 🧮 How the Numbers Work
 
-- **Profit per order line** = payout before TCS/TDS − cost price (unless the item came back and was restocked) − **₹7 packaging per packet**.
+- **Profit comes from payments, on the day each was paid.** Each payment line is analysed on its own:
+  - **Sale:** money received + TCS/TDS held back − cost price − **₹7 packet**.
+  - **Return:** the line holds the sale, the refund and the return shipping, so its money is usually a small loss; − ₹7 packet − cost price only if the item did not come back in good condition.
+  - **RTO:** sale and refund cancel out; it costs the ₹7 packet, plus the cost price if the parcel did not come back fine.
+  - **Penalties, claims and ads:** counted as paid.
+  - **An order not paid yet** has no profit. It shows as money to come, by due date.
+- **Why payouts differ:** every payment line adds up exactly to its parts (price, refund, shipping, commission, fees, TCS/TDS, deductions). The usual payout of a SKU is its middle kept-sale payment, so any payment's gap from it splits exactly into those parts.
 - **Packaging** is charged once per packet whatever the pack size, and is never reversed on a return or RTO, because the packet and label are gone.
 - **TCS and TDS** are held back from payouts but claimed back, so they're never in profit. The **TCS & TDS** page shows them by month and by payment.
 - **GST:** profit is shown **before GST** by default, for sellers who offset GST on sales with input credit on purchases. Switch it on in Settings → General to take each kept sale's GST off profit.
-- **Payout** is the real settlement once it's imported. Until then it's estimated from similar settled orders and labelled *estimated*.
 - **Return cost** = return/RTO charges + ₹7 packaging lost + the cost of anything that came back damaged or lost.
 - **Costs** are per unit as sold: a 4-pack costs four pieces. A cost change takes effect from a date, so older orders keep the cost they had.
 - **History before the first invoice upload.** Payment and returns files reach back weeks.
@@ -233,7 +240,7 @@ Data Health shows what's *missing*. Alerts show what looks *wrong*: each figure 
 | **Medium** | Order missing from that day's labels · RTO tracking number differs from the label's AWB · paid on a different amount than invoiced · Flipkart shipping above usual for its zone (often a wrong weight) · commission above usual · sold at a loss · new order from a frequent returner |
 | **Info** | Price far from your lister's price · large quantity on one order |
 
-- **On the Overview,** the **Needs attention** card counts the high and medium alerts, together with overdue payments and returns open too long.
+- **On Home,** the **Needs attention** card counts the high and medium alerts, together with overdue payments and returns open too long.
 - **On the Alerts page,** each alert says what to do. **Mark OK** hides it for good; **Follow up** pins it to the top.
 - **Thresholds** are in Settings → General.
 - **Nightly:** the job reports new high-severity alerts on WhatsApp.
@@ -301,22 +308,18 @@ GEMINI_API_KEY=your_key
 
 ## 📄 Pages
 
-| Page | What it answers |
-|---|---|
-| **Overview** | Needs attention, sales, profit, returns, payments on the way, areas with the most returns |
-| **Alerts** | Odd figures in the files, with what to do; Mark OK or Follow up |
-| **Products** | Every product → pack size → code, with a platform-compare toggle |
-| **Product detail** | Variants × platforms, the P&L waterfall, return reasons, stock |
-| **Orders** | Every order line with its buyer, source, payout and status |
-| **Customers** | Every buyer: orders, returns, RTO, cancellations, profit, flags; a page per buyer |
-| **Returns** | Reasons, RTO vs customer returns, return cost, returns still open, returns by area |
-| **P&L** | A waterfall that always adds up, from sales to profit |
-| **Stock** | On-hand per shelf, packs you can make, days of cover, value |
-| **TCS & TDS** | Held-back tax by month and by payment |
-| **Import** | Upload, preview, commit, review, undo |
-| **Data Health** | Gaps, unpaid orders, stale returns, missing costs |
-| **Ask AI** | Questions about your own data, answered from the app's numbers |
-| **Settings** | Costs with history, SKU mapping, pack recipes, packaging, GST, payment window, backups |
+Eight areas in the menu, each with its own colour. Areas with more than one page have tabs.
+
+| Area | Tabs | What it answers |
+|---|---|---|
+| **Home** | | Money received, profit from payments, money to come, what needs attention, best and worst products |
+| **Payments** | Payments · Profit breakdown · Money to come · TCS & TDS | Every payment and its profit; why the same SKU is paid differently; a breakdown that always adds up; unpaid orders by due date; held-back tax |
+| **Products** | | Every product → pack size → code, with money received and profit from payments, and a platform-compare toggle |
+| **Orders** | Orders · Returns · Customers | Every order line with its buyer and whether it's paid; return reasons, cost and areas; every buyer with their history |
+| **Stock** | | On-hand per shelf, packs you can make, days of cover, value |
+| **Alerts** | | Odd figures in the files, with what to do; Mark OK or Follow up |
+| **Ask AI** | | Questions about your own data, answered from the app's numbers |
+| **Data** | Import files · Data health · Settings | Upload, preview, commit, undo; gaps and missing costs; costs, SKU mapping, packaging, GST, backups |
 
 ---
 
@@ -334,13 +337,13 @@ Seller-Analytics/
 │   │   │   ├── 📁 flipkart/          invoices (PDF) · settlement · returns · cancellations · orders
 │   │   │   ├── 📁 meesho/            invoices (PDF) · payments · returns · orders
 │   │   │   └── table.js · pdf.js · keys.js · entities.js · stage.js · commit.js
-│   │   ├── 📁 metrics/               lines.js (the one order-line query) · economics · reports · health · anomalies · customers
+│   │   ├── 📁 metrics/               lines.js (the one order-line query) · payments (profit from each payment) · economics · reports · health · anomalies · customers
 │   │   ├── 📁 inventory/             Stock ledger and pack recipes
 │   │   ├── 📁 ai/                    Gemini client · tools · insights
 │   │   └── 📁 routes/api.js
 │   ├── 📁 fetch/nightly.js           Plan / import / mark for the nightly download
 │   └── 📁 client/                    React 18 + Vite + Tailwind 4 (port 5175)
-│       ├── 📁 pages/                 Overview, Products, Returns, P&L, Stock, Import, …
+│       ├── 📁 pages/                 Home, Payments, Products, Orders, Returns, Stock, Import, …
 │       └── 📁 components/ · lib/
 ├── 📁 test/                          Vitest: parsing, imports, invoices, economics, catalog, real layouts
 ├── 📁 docs/auto-download.md          Click-by-click walkthrough of every nightly download
@@ -361,14 +364,14 @@ Seller-Analytics/
 | **Parsing** | SheetJS · `pdfjs-dist` · `fflate` · `zod` | Excel/CSV read as text; PDF labels rebuilt line by line; zips unpacked in memory |
 | **AI** | `@google/generative-ai` · Gemini Flash-Lite chain | Function calling over the app's own metrics; free tier is enough |
 | **Automation** | Claude scheduled task + Claude in Chrome · `src/fetch/nightly.js` | Uses the seller's signed-in browser; all catch-up and import logic stays in code |
-| **Tests** | Vitest | 89 tests; golden tests on real exports when `samples/` has them |
+| **Tests** | Vitest | 110 tests; golden tests on real exports when `samples/` has them |
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-npm test          # 89 tests
+npm test          # 110 tests
 npm run build     # production client into dist/
 ```
 
@@ -388,7 +391,9 @@ npm run build     # production client into dist/
   - packaging kept on RTO;
   - COGS only on damaged or lost returns;
   - TCS/TDS outside profit;
-  - payment windows.
+  - payment windows;
+  - profit from each payment: sale, return, RTO, a sale reversed later, penalties, claims and ads;
+  - each payment's gap from its SKU's usual payout adds up exactly.
 - **Golden tests:** drop your own exports in `samples/flipkart` and `samples/meesho`, and they run on them too. Totals must match each file's own figure to the paisa.
 
 ---
@@ -399,7 +404,7 @@ npm run build     # production client into dist/
 |---|---|---|
 | **Report formats** | Marketplaces rename columns from time to time. | Detection names the missing column and imports nothing. The fix is one alias line in that importer. |
 | **Nightly download** | Needs the Claude desktop app open and Chrome signed in; seller panels change their UI. | Missed nights are caught up; the walkthrough lives in one doc the task re-reads; failures raise a WhatsApp alert. |
-| **Meesho loan settlements** | Not in Meesho's payment Excel, so the app's payout can be above the bank credit by that amount. | Profit is unaffected (it's a loan repayment); importing them from the payments list is on the roadmap. |
+| **Meesho loan settlements** | Not in Meesho's payment Excel, so the money received can be above the bank credit by that amount. | Profit is unaffected (it's a loan repayment); importing them from the payments list is on the roadmap. |
 | **Single seller, local only** | One account per platform, one PC. | Tables carry an `account` column; going online is on the roadmap. |
 | **History** | Stock and invoice-level detail start at the first invoice upload. | Older orders still come in from payment and returns files, flagged as such. |
 

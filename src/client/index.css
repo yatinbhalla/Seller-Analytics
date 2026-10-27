@@ -21,11 +21,11 @@
   --sh: #eb6834;
   --ms: #1baf7a;
   --series: #2a78d6;
-  --good: #0ca30c;
-  --good-text: #006300;
-  --warn: #fab219;
-  --serious: #ec835a;
-  --bad: #d03b3b;
+  --good: #16a34a;
+  --good-text: #15803d;
+  --warn: #f59e0b;
+  --serious: #ea580c;
+  --bad: #dc2626;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,7 +45,9 @@
     --sh: #d95926;
     --ms: #199e70;
     --series: #3987e5;
-    --good-text: #0ca30c;
+    --good: #22c55e;
+    --good-text: #4ade80;
+    --bad: #f87171;
   }
 }
 

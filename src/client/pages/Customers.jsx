@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { qs, useApi } from '../lib/api.js';
 import { useFilters } from '../lib/filters.jsx';
 import { n, niceDate, pct, rs } from '../lib/format.js';
-import { Empty, ErrorBox, Input, Loading, Notice, PageHeader, PlatformTag, Select, Stat } from '../components/ui.jsx';
+import { Empty, ErrorBox, Input, Loading, Money, Notice, PageHeader, PlatformTag, Select, Stat } from '../components/ui.jsx';
 import BuyerFlags from '../components/BuyerFlags.jsx';
 
 export const buyerPath = (key) => `/customers/${encodeURIComponent(key)}`;
@@ -72,7 +72,7 @@ export default function Customers() {
                   <td className="r">{n(b.rto)}</td>
                   <td className="r">{n(b.cancelled)}</td>
                   <td className="r">{pct(b.returnRate)}</td>
-                  <td className={`r ${b.profit < 0 ? 'text-bad' : ''}`}>{rs(b.profit)}{!b.profitKnown && <div className="text-[11px] text-muted">part estimated</div>}</td>
+                  <td className="r"><Money paise={b.profit} />{!b.profitKnown && <div className="text-[11px] text-muted">some without cost</div>}</td>
                   <td className="whitespace-nowrap">{b.lastDate ? niceDate(b.lastDate) : '—'}</td>
                   <td><BuyerFlags flags={b.flags} /></td>
                 </tr>
