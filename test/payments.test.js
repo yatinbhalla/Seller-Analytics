@@ -10,7 +10,7 @@ function seed(db, { orders = [], returns = [], payments = [] }) {
     .run(`seed-${Math.random()}`).lastInsertRowid;
   for (const o of orders) {
     const row = {
-      platform: 'meesho', account: 'main', order_id: o.key.split('_')[0], shipment_key: o.ship || o.key, invoice_no: null,
+      platform: o.platform || 'meesho', account: 'main', order_id: o.key.split('_')[0], shipment_key: o.ship || o.key, invoice_no: null,
       invoice_date: o.date || '2026-10-01', order_date: null, sku: o.sku, code: o.sku.split('/')[0].toUpperCase(), qty: o.qty || 1,
       gross_paise: o.total, discount_paise: 0, taxable_paise: Math.round(o.total / 1.12), tax_paise: o.total - Math.round(o.total / 1.12),
       total_paise: o.total, ship_state: o.state || null, ship_pincode: null, cancelled: 0, order_item_key: o.key,
@@ -31,8 +31,8 @@ function seed(db, { orders = [], returns = [], payments = [] }) {
     const net = m.sale + m.refund + m.commission + m.shipping + m.reverse + m.tax + m.penalty + m.claim + m.ads;
     db.prepare(`INSERT INTO settlement_lines (natural_key, platform, order_item_key, sku, code, txn_type, payment_date, sale_paise, refund_paise,
                 commission_paise, shipping_paise, reverse_ship_paise, tax_withheld_paise, penalty_paise, claim_paise, ads_paise, net_paise,
-                import_id, content_hash) VALUES (?, 'meesho', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'h')`)
-      .run(naturalKey('meesho', 'main', `${p.key || 'none'}|${p.type || 'sale'}|${i}`), p.key || null, p.sku || null,
+                import_id, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'h')`)
+      .run(naturalKey(p.platform || 'meesho', 'main', `${p.key || 'none'}|${p.type || 'sale'}|${i}`), p.platform || 'meesho', p.key || null, p.sku || null,
         p.sku ? p.sku.split('/')[0] : null, p.type || 'sale', p.date || '2026-10-12', m.sale, m.refund, m.commission, m.shipping,
         m.reverse, m.tax, m.penalty, m.claim, m.ads, net, imp);
   });
@@ -177,29 +177,44 @@ describe('profit from each payment', () => {
 });
 
 describe('why the same SKU is paid differently', () => {
-  const seedSku = (db) =>
+  // Flipkart takes its shipping off the price the buyer saw, so shipping moves the payout.
+  const seedFlipkart = (db) =>
     seed(db, {
-      orders: ['1', '2', '3', '4'].map((i) => ({ key: `u${i}_1`, sku: 'WH_MFO/1', total: 20000 })),
+      orders: ['1', '2', '3', '4'].map((i) => ({ key: `u${i}_1`, sku: 'WH_MFO/1', total: 20000, platform: 'flipkart' })),
       payments: [
-        { key: 'u1_1', sku: 'WH_MFO/1', sale: 18000, shipping: -4000 },
-        { key: 'u2_1', sku: 'WH_MFO/1', sale: 20000, shipping: -4500 },
-        { key: 'u3_1', sku: 'WH_MFO/1', sale: 21000, shipping: -4000 },
-        { key: 'u4_1', sku: 'WH_MFO/1', sale: 20000, shipping: -9000 },
+        { key: 'u1_1', sku: 'WH_MFO/1', sale: 18000, shipping: -4000, platform: 'flipkart' },
+        { key: 'u2_1', sku: 'WH_MFO/1', sale: 20000, shipping: -4500, platform: 'flipkart' },
+        { key: 'u3_1', sku: 'WH_MFO/1', sale: 21000, shipping: -4000, platform: 'flipkart' },
+        { key: 'u4_1', sku: 'WH_MFO/1', sale: 20000, shipping: -9000, platform: 'flipkart' },
+      ],
+    });
+  // Meesho adds its shipping on top of the seller's price, so the buyer's price swings
+  // with distance while the payout does not.
+  const seedMeesho = (db) =>
+    seed(db, {
+      orders: ['1', '2', '3', '4'].map((i) => ({ key: `m${i}_1`, sku: 'WH_MFO/1', total: 20000 })),
+      payments: [
+        { key: 'm1_1', sku: 'WH_MFO/1', sale: 18000, shipping: -4000 },
+        { key: 'm2_1', sku: 'WH_MFO/1', sale: 20000, shipping: -6000 },
+        { key: 'm3_1', sku: 'WH_MFO/1', sale: 21000, shipping: -7000 },
+        { key: 'm4_1', sku: 'WH_MFO/1', sale: 17000, shipping: -2000 },
       ],
     });
 
   it('gives each SKU its usual payout, range and what moves it', () => {
     const db = makeDb();
-    seedSku(db);
+    seedFlipkart(db);
     const sku = paymentReport(db, {}).skus.find((s) => s.code === 'WH_MFO');
     expect(sku.sales).toBe(4);
     expect([sku.payout.low, sku.payout.usual, sku.payout.high]).toEqual([11000, 14000, 17000]);
     expect(sku.payout.drivers.map((d) => d.part).sort()).toEqual(['price', 'shipping']);
+    // Usual: an 18,000 buyer price, of which Flipkart kept 4,000.
+    expect([sku.payout.usualPrice, sku.payout.usualKept]).toEqual([18000, 4000]);
   });
 
   it("splits a payment's gap from the usual one into parts that add up exactly", () => {
     const db = makeDb();
-    seedSku(db);
+    seedFlipkart(db);
     const rows = paymentList(db, {}).rows;
     for (const r of rows) {
       expect(r.vsUsual.parts.reduce((a, p) => a + p.diff, 0)).toBe(r.vsUsual.gap);
@@ -207,5 +222,35 @@ describe('why the same SKU is paid differently', () => {
     const far = rows.find((r) => r.itemKey === 'u4_1').vsUsual;
     expect(far.gap).toBe(11000 - 14000);
     expect(far.parts).toEqual([{ part: 'shipping', label: 'Shipping', diff: -5000 }, { part: 'price', label: 'Price the buyer paid', diff: 2000 }]);
+  });
+
+  it("on Meesho, the shipping the buyer pays never counts as moving the payout; the seller's own price does", () => {
+    const db = makeDb();
+    seedMeesho(db);
+    const sku = paymentReport(db, {}).skus.find((s) => s.code === 'WH_MFO');
+    expect(sku.payout.drivers.map((d) => d.part)).toEqual(['price']);
+    expect(sku.payout.drivers[0].label).toBe('Your price (buyer price less Meesho shipping)');
+    expect([sku.payout.usualPrice, sku.payout.usualKept]).toEqual([14000, 0]);
+    const rows = paymentList(db, {}).rows;
+    // Same own price, different distance: the same payout, nothing to explain.
+    expect(rows.find((r) => r.itemKey === 'm1_1').vsUsual).toEqual({ usual: 14000, gap: 0, parts: [] });
+    const higher = rows.find((r) => r.itemKey === 'm4_1');
+    expect(higher.vsUsual.parts).toEqual([{ part: 'price', label: 'Your price (buyer price less Meesho shipping)', diff: 1000 }]);
+    expect(higher.buyerShipping).toBe(2000);
+  });
+
+  it('shows the payout of each listing copy of a code', () => {
+    const db = makeDb();
+    seed(db, {
+      orders: ['1', '2', '3', '4'].map((i) => ({ key: `c${i}_1`, sku: i < '3' ? 'WH_MFO/1' : 'WH_MFO/40365', total: 20000 })),
+      payments: [
+        { key: 'c1_1', sku: 'WH_MFO/1', sale: 17000, shipping: -4000 },
+        { key: 'c2_1', sku: 'WH_MFO/1', sale: 19000, shipping: -6000 },
+        { key: 'c3_1', sku: 'WH_MFO/40365', sale: 21000, shipping: -5000 },
+        { key: 'c4_1', sku: 'WH_MFO/40365', sale: 18000, shipping: -2000 },
+      ],
+    });
+    const sku = paymentReport(db, {}).skus.find((s) => s.code === 'WH_MFO');
+    expect(sku.payout.byListing.map((l) => [l.sku, l.n, l.payout]).sort()).toEqual([['WH_MFO/1', 2, 13000], ['WH_MFO/40365', 2, 16000]]);
   });
 });

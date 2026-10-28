@@ -79,6 +79,30 @@ function partsOf(s) {
   };
 }
 
+/**
+ * The same parts as the seller prices on each platform, for explaining payouts.
+ *
+ * Meesho: the seller sets the price to be settled on and Meesho adds its shipping on
+ * top for the buyer, so the buyer's price minus that shipping is the seller's own
+ * price, and the forward shipping never moves the payout (checked on the real files:
+ * that price holds steady per code while the buyer's price swings with distance).
+ * Return shipping is still charged to the seller.
+ *
+ * Flipkart: the seller sets the price the buyer sees and Flipkart takes its fees and
+ * shipping off it, so the parts stay as they are.
+ */
+function viewOf(platform, parts, s) {
+  if (platform !== 'meesho') return parts;
+  return { ...parts, price: s.sale_paise + s.shipping_paise, shipping: s.reverse_ship_paise };
+}
+
+/** What a part is called on a platform: "price" means a different thing on each. */
+export function partLabel(platform, part) {
+  if (part === 'price') return platform === 'meesho' ? 'Your price (buyer price less Meesho shipping)' : 'Price the buyer paid';
+  if (part === 'shipping' && platform === 'meesho') return 'Return shipping';
+  return PARTS[part];
+}
+
 const GOODS_EVENTS = new Set(['sale', 'return', 'rto']);
 
 /**
@@ -148,6 +172,9 @@ export function loadPayments(db) {
       buyerState: line?.ship_state || null,
       shippingZone: s.shipping_zone || line?.shipping_zone || null,
       parts,
+      view: viewOf(s.platform, parts, s),
+      // Meesho's shipping, added on top of the seller's price and paid by the buyer.
+      buyerShipping: s.platform === 'meesho' ? -s.shipping_paise : null,
       net: s.net_paise,
       taxBack,
       received: s.net_paise + taxBack,
@@ -256,19 +283,40 @@ export function skuPayouts(events) {
     if (list.length < 3) continue;
     const byNet = [...list].sort((a, b) => a.net - b.net || a.id - b.id);
     const usual = median(byNet);
+    const platform = usual.platform;
     const drivers = [];
     for (const part of Object.keys(PARTS)) {
-      const vals = list.map((e) => e.parts[part]).sort((a, b) => a - b);
+      const vals = list.map((e) => e.view[part]).sort((a, b) => a - b);
       const spread = at(vals, 0.9) - at(vals, 0.1);
-      if (spread >= 500) drivers.push({ part, label: PARTS[part], low: vals[0], high: vals[vals.length - 1], spread });
+      if (spread >= 500) drivers.push({ part, label: partLabel(platform, part), low: vals[0], high: vals[vals.length - 1], spread });
     }
     drivers.sort((a, b) => b.spread - a.spread);
+    // One code is often listed several times (CODE/1, CODE/40365, …), each at its own
+    // price — on the real Meesho files the main reason one code is paid differently.
+    const copies = new Map();
+    for (const e of list) {
+      if (!copies.has(e.sku)) copies.set(e.sku, []);
+      copies.get(e.sku).push(e);
+    }
+    const byListing = [...copies]
+      .filter(([, v]) => v.length >= 2)
+      .map(([sku, v]) => ({
+        sku, n: v.length,
+        price: median(v.map((e) => e.view.price).sort((a, b) => a - b)),
+        payout: median(v.map((e) => e.net).sort((a, b) => a - b)),
+      }))
+      .sort((a, b) => b.n - a.n);
     out.set(k, {
+      byListing,
       key: k,
       n: list.length,
       usualId: usual.id,
       usual: usual.net,
-      usualParts: usual.parts,
+      usualParts: usual.view,
+      // The price the payout starts from (on Meesho, the seller's own price) and what
+      // the platform usually keeps of it: on Meesho only TCS/TDS, on Flipkart its fees.
+      usualPrice: usual.view.price,
+      usualKept: median(list.map((e) => e.view.price - e.net).sort((a, b) => a - b)),
       low: byNet[0].net,
       high: byNet[byNet.length - 1].net,
       p10: at(byNet.map((e) => e.net), 0.1),
@@ -283,7 +331,7 @@ export function skuPayouts(events) {
 export function explainPayment(e, usual) {
   if (!usual || e.kind !== 'sale') return null;
   const parts = Object.keys(PARTS)
-    .map((part) => ({ part, label: PARTS[part], diff: e.parts[part] - usual.usualParts[part] }))
+    .map((part) => ({ part, label: partLabel(e.platform, part), diff: e.view[part] - usual.usualParts[part] }))
     .filter((p) => p.diff !== 0)
     .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   return { usual: usual.usual, gap: e.net - usual.usual, parts };

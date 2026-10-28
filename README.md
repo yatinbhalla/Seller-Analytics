@@ -92,7 +92,7 @@ It merges them per order line and works out real profit from every payment recei
   - payment windows
   - packs of 1, 2 and 4 drawing on one shared stock shelf
 - **Automated** the daily routine. A nightly Claude scheduled task downloads the reports in the seller's own Chrome, and a local script works out what's missing, imports it and raises a WhatsApp alert only when something needs attention.
-- **Validated** with 110 automated tests, including golden tests that run on real export files when they are present.
+- **Validated** with 112 automated tests, including golden tests that run on real export files when they are present.
 
 ---
 
@@ -105,7 +105,7 @@ It merges them per order line and works out real profit from every payment recei
 - 👀 **Preview before commit.** For every file you see new, updated, already-known and set-aside rows, money totals, date range and new SKU codes.
 - ✅ **Commits that check themselves.** One transaction per batch, a backup first, and every row read back and compared to the paisa before it closes. Any import can be undone.
 - 💸 **Profit from every payment received.** Each payment is analysed when it arrives: money received − cost of goods − ₹7 packet. Orders not paid yet carry no profit; they are money to come.
-- 🔍 **Why the same SKU is paid differently.** For each SKU: the usual payout, the lowest and highest, and which part of the payment moves it (the price the buyer paid, shipping, commission, fees). Each payment's gap from the usual one splits into those parts, to the rupee.
+- 🔍 **Why the same SKU is paid differently.** For each SKU: the usual payout, the lowest and highest, what the platform keeps, and which part of the payment moves it. On Meesho that is the seller's own price, because Meesho adds its shipping on top for the buyer; on Flipkart it is the price the buyer paid, shipping and fees. Each payment's gap from the usual one splits into those parts, to the rupee, and each listing copy of a code shows its own payout.
 - 🎨 **Simple and colour-coded.** Eight areas, each with its own colour. Priorities in red, amber and blue; money in green, money out in red.
 - ↩️ **Returns that tell you why.** Reasons and sub-reasons per product and platform, RTO vs customer returns, return cost, and returns still open after 30 days (worth a claim).
 - 📦 **Stock that follows dispatches.** Packs of 1, 2 and 4 and `_SET` variation listings share one shelf. Good returns restock; damaged and lost ones are written off.
@@ -364,14 +364,14 @@ Seller-Analytics/
 | **Parsing** | SheetJS · `pdfjs-dist` · `fflate` · `zod` | Excel/CSV read as text; PDF labels rebuilt line by line; zips unpacked in memory |
 | **AI** | `@google/generative-ai` · Gemini Flash-Lite chain | Function calling over the app's own metrics; free tier is enough |
 | **Automation** | Claude scheduled task + Claude in Chrome · `src/fetch/nightly.js` | Uses the seller's signed-in browser; all catch-up and import logic stays in code |
-| **Tests** | Vitest | 110 tests; golden tests on real exports when `samples/` has them |
+| **Tests** | Vitest | 112 tests; golden tests on real exports when `samples/` has them |
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-npm test          # 110 tests
+npm test          # 112 tests
 npm run build     # production client into dist/
 ```
 

@@ -112,9 +112,14 @@ function SkuTable({ rows, selected, onSelect }) {
   const x = (v) => `${((v - lo) / (hi - lo)) * 100}%`;
   return (
     <Card className="mt-4" tone="green" title="Why the same SKU is paid differently">
+      <p className="mb-1 text-xs text-ink-2">
+        <b className="font-medium text-ink">Meesho</b> pays on your price: the buyer pays your price plus the shipping Meesho adds, so distance never
+        changes your payout. Meesho then keeps only TCS/TDS. <b className="font-medium text-ink">Flipkart</b> pays on the price the buyer saw, less its
+        fees and shipping.
+      </p>
       <p className="mb-3 text-xs text-ink-2">
-        Usual is the middle payment of kept sales. The bar runs from the lowest to the highest payment; the chips name the parts of the payment that
-        move it. Pick a SKU to see its payments below.
+        Usual is the middle payment of kept sales. The bar runs from the lowest to the highest payment; the chips name the parts that move it. Pick a
+        SKU to see its payments below.
       </p>
       <div className="overflow-x-auto">
         <table className="data">
@@ -123,6 +128,7 @@ function SkuTable({ rows, selected, onSelect }) {
               <th>SKU</th>
               <th className="r">Paid sales</th>
               <th className="r">Usual payout</th>
+              <th className="r">Platform keeps</th>
               <th className="w-48">Lowest – highest</th>
               <th>Varies by</th>
               <th className="r">Returns · RTO</th>
@@ -139,6 +145,10 @@ function SkuTable({ rows, selected, onSelect }) {
                 </td>
                 <td className="r">{n(r.sales)}</td>
                 <td className="r">{r.payout ? rs(r.payout.usual) : '—'}</td>
+                <td className="r" title={r.payout ? `of a usual ${r.platform === 'meesho' ? 'your price' : 'buyer price'} of ${rs(r.payout.usualPrice)}` : undefined}>
+                  {r.payout ? rs(r.payout.usualKept) : '—'}
+                  {r.payout && <div className="text-[11px] text-muted">of {rs(r.payout.usualPrice)}</div>}
+                </td>
                 <td>
                   {r.payout ? (
                     <div title={`${rs(r.payout.low)} – ${rs(r.payout.high)}`}>
@@ -156,6 +166,11 @@ function SkuTable({ rows, selected, onSelect }) {
                       <Chip key={d.part} tone={d.part === 'shipping' ? 'coral' : d.part === 'price' ? 'violet' : 'blue'} title={`${rs(d.low)} to ${rs(d.high)}`}>{d.label}</Chip>
                     ))}
                   </div>
+                  {listingSpread(r.payout) && (
+                    <div className="mt-1 text-[11px] text-ink-2" title="Median payout of each listing copy of this code">
+                      By listing: {r.payout.byListing.slice(0, 4).map((l) => `/${l.sku.split('/')[1] || l.sku} ${rs(l.payout)}`).join(' · ')}
+                    </div>
+                  )}
                 </td>
                 <td className="r text-ink-2">{n(r.returns)} · {n(r.rto)}</td>
                 <td className="r">{r.profitPerSale == null ? '—' : <Money paise={r.profitPerSale} />}</td>
@@ -167,6 +182,12 @@ function SkuTable({ rows, selected, onSelect }) {
       </div>
     </Card>
   );
+}
+
+/** Worth showing when the code's listing copies are paid at least ₹5 apart. */
+function listingSpread(payout) {
+  const l = payout?.byListing || [];
+  return l.length > 1 && Math.max(...l.map((x) => x.payout)) - Math.min(...l.map((x) => x.payout)) >= 500;
 }
 
 /** Each payment, newest first, with what it left as profit and how it compares with its SKU's usual payment. */
@@ -199,8 +220,8 @@ function PaymentList({ filters, code, onClear }) {
                   <th>Paid on</th>
                   <th>Type</th>
                   <th>SKU</th>
-                  <th className="r">Buyer paid</th>
-                  <th className="r">Fees and shipping</th>
+                  <th className="r">Price</th>
+                  <th className="r">Taken off</th>
                   <th className="r">Received</th>
                   <th className="r">Cost and packet</th>
                   <th className="r">Profit</th>
@@ -209,7 +230,9 @@ function PaymentList({ filters, code, onClear }) {
               </thead>
               <tbody>
                 {data.rows.map((p) => {
-                  const fees = p.parts.commission + p.parts.fees + p.parts.shipping + p.parts.deductions + p.parts.other;
+                  // On Meesho the price is the seller's own (buyer price less Meesho's shipping).
+                  const price = p.view.price + p.view.refund;
+                  const takenOff = p.net - price;
                   return (
                     <tr key={p.id}>
                       <td className="whitespace-nowrap">{niceDate(p.date)}<div className="text-xs text-muted"><PlatformTag platform={p.platform} /></div></td>
@@ -218,8 +241,11 @@ function PaymentList({ filters, code, onClear }) {
                         <div className="text-ink">{p.sku || '—'}</div>
                         {p.orderId && <div className="text-xs text-muted">{p.orderId}</div>}
                       </td>
-                      <td className="r">{p.parts.price || p.parts.refund ? rs(p.parts.price + p.parts.refund) : '—'}</td>
-                      <td className="r">{fees ? <Money paise={fees} /> : '—'}</td>
+                      <td className="r">
+                        {price ? rs(price) : '—'}
+                        {p.buyerShipping > 0 && price > 0 && <div className="text-[11px] text-muted">buyer paid +{rs(p.buyerShipping)} shipping</div>}
+                      </td>
+                      <td className="r">{takenOff ? <Money paise={takenOff} /> : '—'}</td>
                       <td className="r"><Money paise={p.net} /></td>
                       <td className="r text-ink-2">{p.cost || p.packet ? rs(-(p.cost || 0) - p.packet) : '—'}</td>
                       <td className="r">{p.profit == null ? <span className="text-xs text-muted">no cost price</span> : <Money paise={p.profit} />}</td>

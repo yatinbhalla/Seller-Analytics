@@ -123,12 +123,15 @@ export function buildTools(db) {
       },
     },
     get_payments_by_sku: {
-      description: 'Payments received per SKU (platform, product code, pack size): usual payout, lowest and highest, which parts of the payment make it vary (price the buyer paid, shipping, commission, fees), and profit per paid sale. Use to explain why the same product is paid differently.',
+      description: 'Payments received per SKU (platform, product code, pack size): usual payout, lowest and highest, which parts of the payment make it vary, what the platform keeps, the payout of each listing copy (CODE/number), and profit per paid sale. On Meesho the seller sets their own price and Meesho adds its shipping on top for the buyer, so shipping never moves a Meesho payout; on Flipkart the seller sets the buyer price and Flipkart takes fees and shipping off it. Use to explain why the same product is paid differently.',
       parameters: { type: 'object', properties: { ...filterParams, code: { type: 'string', description: 'Only this product code, e.g. TC_BT.' } } },
       run: (a) => paymentReport(db, { ...f(a), code: a.code || null }).skus.slice(0, 40).map((s) => ({
         platform: s.platform, code: s.code, packOf: s.qty, product: s.product, paidSales: s.sales, returns: s.returns, rto: s.rto,
         receivedRs: rupees(s.received), profitRs: rupees(s.profit), profitPerSaleRs: rupees(s.profitPerSale),
         usualPayoutRs: rupees(s.payout?.usual), lowestRs: rupees(s.payout?.low), highestRs: rupees(s.payout?.high),
+        // On Meesho the price is the seller's own (the buyer also pays Meesho's shipping on top).
+        usualPriceRs: rupees(s.payout?.usualPrice), platformKeepsRs: rupees(s.payout?.usualKept),
+        byListingCopy: s.payout ? s.payout.byListing.slice(0, 6).map((l) => ({ listing: l.sku, paidSales: l.n, payoutRs: rupees(l.payout) })) : [],
         variesBy: s.payout ? s.payout.drivers.map((d) => ({ part: d.label, lowRs: rupees(d.low), highRs: rupees(d.high) })) : [],
       })),
     },
