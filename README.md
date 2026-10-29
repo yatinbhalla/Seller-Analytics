@@ -1,5 +1,5 @@
 <div align="center">
-
+ 
 # 📊 Seller Analytics
 ### *One local dashboard for Flipkart, Shopsy and Meesho: orders, returns, real profit and stock, from the marketplaces' own files and with no double counting.*
 
